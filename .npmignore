@@ -1,0 +1,15 @@
+node_modules/
+src/
+tests/
+coverage/
+test-results/
+playwright-report/
+releases/
+.git/
+.github/
+.vscode/
+*.log
+tsconfig*.json
+vitest.config.ts
+playwright.config.ts
+vite.config.ts

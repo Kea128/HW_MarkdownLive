@@ -1,0 +1,110 @@
+{
+  "name": "inkdown",
+  "private": true,
+  "version": "2.6.0",
+  "description": "安全、本地优先的 Windows Markdown 实时编辑器",
+  "author": "Inkdown Contributors",
+  "type": "module",
+  "main": "dist-electron/main.cjs",
+  "scripts": {
+    "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "icons": "node scripts/generate-icons.mjs",
+    "prebuild": "npm run icons",
+    "build:electron": "vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
+    "build": "tsc -b && vite build && npm run build:electron",
+    "lint": "oxlint src electron tests scripts vite.config.ts vite.main.config.ts vite.preload.config.ts vitest.config.ts playwright.config.ts",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "pretest:e2e": "npm run build",
+    "test:e2e": "playwright test",
+    "verify": "npm run lint && npm run typecheck && npm test && npm run test:coverage && npm run test:e2e",
+    "start": "electron .",
+    "clean:release": "node scripts/clean-release.mjs",
+    "prepackage:win": "npm run clean:release",
+    "package:win": "npm run build && electron-builder --win nsis portable zip",
+    "smoke:release": "node scripts/smoke-packaged.mjs",
+    "release": "npm run verify && npm run package:win && node scripts/release.mjs && npm run smoke:release && npm run clean:release"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@milkdown/crepe": "^7.22.0",
+    "@milkdown/kit": "^7.22.0",
+    "@playwright/test": "^1.62.1",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.4",
+    "@vitest/coverage-v8": "^4.1.10",
+    "concurrently": "^10.0.4",
+    "cross-env": "^10.1.0",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
+    "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.9.0",
+    "jsdom": "^30.0.1",
+    "katex": "^0.18.1",
+    "lucide-react": "^1.29.0",
+    "oxlint": "^1.75.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "typescript": "~6.0.2",
+    "typescript-eslint": "^8.66.0",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10",
+    "wait-on": "^9.1.0"
+  },
+  "build": {
+    "appId": "com.inkdown.desktop",
+    "productName": "Inkdown",
+    "artifactName": "Inkdown-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release-build"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "npmRebuild": false,
+    "electronDist": "node_modules/electron/dist",
+    "fileAssociations": [
+      {
+        "ext": [
+          "md",
+          "markdown",
+          "txt"
+        ],
+        "name": "Markdown 文档",
+        "role": "Editor"
+      }
+    ],
+    "win": {
+      "icon": "public/icon.ico",
+      "target": [
+        "nsis",
+        "portable",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "artifactName": "Inkdown-${version}-${arch}-setup.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "Inkdown-${version}-${arch}-portable.${ext}"
+    }
+  },
+  "allowScripts": {
+    "electron@43.3.0": true
+  }
+}

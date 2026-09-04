@@ -1,0 +1,723 @@
+.app {
+  --editor-line-height: 1.72;
+  height: 100dvh;
+  display: grid;
+  grid-template-rows: 42px 44px minmax(0, 1fr) 26px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.app[data-line-spacing="compact"] { --editor-line-height: 1.5; }
+.app[data-line-spacing="relaxed"] { --editor-line-height: 1.95; }
+
+.app.mode-visual {
+  grid-template-rows: 42px minmax(0, 1fr) 26px;
+}
+
+.drop-overlay {
+  position: fixed;
+  inset: 14px;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--surface) 90%, transparent);
+  font-size: 20px;
+  font-weight: 650;
+  pointer-events: none;
+}
+
+.topbar,
+.formatbar,
+.statusbar {
+  display: flex;
+  align-items: center;
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+}
+
+.topbar {
+  position: relative;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  -webkit-app-region: drag;
+}
+
+.document-actions,
+.view-actions,
+.mode-switcher,
+.stats {
+  display: flex;
+  align-items: center;
+}
+
+.document-actions {
+  gap: 2px;
+}
+
+.document-actions,
+.view-actions,
+.topbar button {
+  -webkit-app-region: no-drag;
+}
+
+.action-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.title-area {
+  position: absolute;
+  left: 50%;
+  max-width: 32vw;
+  transform: translateX(-50%);
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.dirty-dot {
+  margin-left: 6px;
+  color: var(--accent);
+  font-size: 9px;
+}
+
+.view-actions {
+  gap: 8px;
+  margin-left: auto;
+}
+
+.line-spacing-control {
+  height: 28px;
+  -webkit-app-region: no-drag;
+}
+
+.line-spacing-control select {
+  width: 72px;
+  height: 28px;
+  padding: 0 22px 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface);
+  font: 12px/1 var(--sans);
+  cursor: pointer;
+}
+
+.line-spacing-control select:hover,
+.line-spacing-control select:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+  color: var(--text);
+  outline: 0;
+}
+
+button {
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+button:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.topbar button {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+  padding: 0;
+  font-size: 13px;
+}
+
+button svg {
+  width: 17px;
+  height: 17px;
+  stroke-width: 1.8;
+}
+
+.mode-switcher {
+  padding: 1px;
+  border-radius: 6px;
+  background: transparent;
+}
+
+.mode-switcher button {
+  width: 30px;
+  height: 27px;
+  padding: 0;
+  justify-content: center;
+}
+
+.mode-switcher button.active {
+  color: var(--text);
+  background: var(--hover);
+}
+
+.formatbar {
+  gap: 3px;
+  padding: 0 max(14px, calc((100% - 920px) / 2));
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 97%, var(--subtle));
+  box-shadow: 0 1px 4px rgba(24, 31, 40, .04);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.formatbar::-webkit-scrollbar { display: none; }
+
+.formatbar button {
+  position: relative;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 5px;
+}
+
+.formatbar button:hover {
+  color: var(--accent);
+}
+
+.heading-control,
+.equation-reference-control {
+  height: 32px;
+  flex: 0 0 auto;
+}
+
+.heading-control select,
+.equation-reference-control select {
+  width: 92px;
+  height: 32px;
+  padding: 0 26px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--surface);
+  font: 13px/1 var(--sans);
+  cursor: pointer;
+}
+
+.equation-reference-control select {
+  width: 112px;
+}
+
+.equation-reference-control select:disabled {
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
+.heading-control select:hover,
+.heading-control select:focus-visible,
+.equation-reference-control select:hover,
+.equation-reference-control select:focus-visible {
+  border-color: color-mix(in srgb, var(--accent) 62%, var(--border));
+  outline: 0;
+}
+
+.badged-tool small {
+  position: absolute;
+  right: 1px;
+  bottom: 0;
+  padding: 0 1px;
+  border-radius: 2px;
+  color: var(--accent);
+  background: var(--surface);
+  font: 8px/10px var(--sans);
+  pointer-events: none;
+}
+
+.separator {
+  width: 1px;
+  height: 18px;
+  margin: 0 5px;
+  background: var(--border);
+}
+
+.workspace {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace.has-sidebar {
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
+.sidebar {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  background: var(--sidebar);
+}
+
+.sidebar-heading {
+  padding: 20px 14px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.outline {
+  padding: 0 8px 20px;
+}
+
+.outline button {
+  width: 100%;
+  height: 31px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  padding-right: 8px;
+  text-align: left;
+}
+
+.outline button span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.outline button small {
+  color: var(--faint);
+  font-size: 10px;
+}
+
+.outline-empty {
+  margin: 10px 10px;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.editor-pane,
+.visual-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.editor-pane {
+  background: var(--editor);
+}
+
+.editor-shell {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(42px, 1fr) minmax(0, 860px) minmax(42px, 1fr);
+  overflow: hidden;
+}
+
+.line-numbers {
+  --source-top-padding: 46px;
+  position: relative;
+  grid-column: 1;
+  height: 100%;
+  overflow: hidden;
+  padding: var(--source-top-padding) 12px 96px 0;
+  color: var(--faint);
+  background: var(--editor);
+  font: 12.5px/28px var(--mono);
+  text-align: right;
+  white-space: pre;
+  user-select: none;
+}
+
+.line-number-list {
+  display: block;
+}
+
+.current-line-number {
+  position: absolute;
+  top: calc(var(--source-top-padding) + var(--line-index) * 28px);
+  right: 12px;
+  height: 28px;
+  padding-left: 5px;
+  color: var(--accent);
+  background: var(--editor);
+  font-weight: 650;
+}
+
+.editor-shell textarea {
+  grid-column: 2;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border: 0;
+  color: var(--editor-text);
+  background: var(--editor);
+  padding: 46px 32px 96px;
+  font: 16px/28px var(--mono);
+  font-weight: 450;
+  letter-spacing: .01em;
+  tab-size: 2;
+  caret-color: var(--accent);
+}
+
+.editor-shell:focus-within {
+  box-shadow: none;
+}
+
+.editor-shell textarea:focus {
+  outline: 0;
+}
+
+.editor-shell textarea:focus-visible {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.visual-pane {
+  background: var(--surface);
+}
+
+.visual-editor {
+  width: min(100%, 1440px);
+  min-height: 100%;
+  margin: 0 auto;
+}
+
+.visual-editor > div,
+.visual-editor .milkdown {
+  min-height: 100%;
+}
+
+.visual-editor .milkdown {
+  --crepe-color-background: var(--surface);
+  --crepe-color-on-background: var(--heading);
+  --crepe-color-surface: var(--subtle);
+  --crepe-color-surface-low: var(--editor);
+  --crepe-color-on-surface: var(--text);
+  --crepe-color-on-surface-variant: var(--muted);
+  --crepe-color-outline: var(--border);
+  --crepe-color-primary: var(--accent);
+  --crepe-color-secondary: var(--hover);
+  --crepe-color-on-secondary: var(--text);
+  --crepe-color-inline-code: var(--danger);
+  --crepe-color-hover: var(--hover);
+  --crepe-color-selected: color-mix(in srgb, var(--accent) 25%, var(--surface));
+  --crepe-color-inline-area: var(--inline-code);
+  --crepe-font-title: var(--sans);
+  --crepe-font-default: var(--sans);
+  --crepe-font-code: var(--mono);
+  color: var(--text);
+  background: var(--surface);
+}
+
+.visual-editor .milkdown .ProseMirror {
+  min-height: 100%;
+  padding: 50px clamp(24px, 4vw, 56px) 96px;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 400;
+  line-height: var(--editor-line-height);
+  letter-spacing: .005em;
+  caret-color: var(--accent);
+  overflow-wrap: break-word;
+}
+
+.visual-editor .milkdown .ProseMirror:focus {
+  outline: 0;
+}
+
+.visual-editor .milkdown .ProseMirror:focus-visible {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 75%, transparent);
+}
+
+.visual-editor .milkdown .ProseMirror h1,
+.visual-editor .milkdown .ProseMirror h2,
+.visual-editor .milkdown .ProseMirror h3,
+.visual-editor .milkdown .ProseMirror h4,
+.visual-editor .milkdown .ProseMirror h5,
+.visual-editor .milkdown .ProseMirror h6 {
+  color: var(--heading);
+  font-family: var(--sans);
+  font-weight: 700;
+  line-height: 1.35;
+  margin: 1.45em 0 .58em;
+}
+
+.visual-editor .milkdown .ProseMirror h1 {
+  margin-top: 0;
+  padding-bottom: .3em;
+  border-bottom: 1px solid var(--border);
+  font-size: 2em;
+  letter-spacing: -.025em;
+}
+
+.visual-editor .milkdown .ProseMirror h2 {
+  padding-bottom: .2em;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  font-size: 1.55em;
+}
+
+.visual-editor .milkdown .ProseMirror h3 { font-size: 1.3em; }
+.visual-editor .milkdown .ProseMirror h4 { font-size: 1.12em; }
+.visual-editor .milkdown .ProseMirror h5 { font-size: 1em; }
+.visual-editor .milkdown .ProseMirror h6 { color: var(--muted); font-size: .9em; }
+
+.visual-editor .milkdown .ProseMirror p {
+  margin: 0 0 .88em;
+  padding: 0;
+  line-height: var(--editor-line-height);
+}
+
+.visual-editor .milkdown .ProseMirror a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+.visual-editor .milkdown .ProseMirror a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.visual-editor .milkdown .ProseMirror a[href^="#eq-"] {
+  padding: .08em .32em;
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  font-weight: 550;
+  white-space: nowrap;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) {
+  position: relative;
+  scroll-margin-top: 88px;
+  margin: .6em 0;
+  padding: 5px 38px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within {
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--subtle) 30%, transparent);
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .katex-display {
+  max-width: 100%;
+  margin: .12em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  font-size: 1em;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .tools,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .language-picker,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .preview-label,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .preview-divider {
+  opacity: 0;
+  transition: opacity .16s ease;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .tools {
+  position: absolute;
+  z-index: 2;
+  inset: 5px 8px auto;
+  pointer-events: none;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover .tools,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within .tools,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover .language-picker,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within .language-picker,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover .preview-label,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within .preview-label {
+  opacity: 1;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover .tools,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within .tools {
+  pointer-events: auto;
+}
+
+.visual-editor .milkdown .ProseMirror span[data-type="math_inline"] .katex {
+  font-size: 1em;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block.tagged-equation:has(.katex-display) {
+  padding-left: 68px;
+  padding-right: 68px;
+}
+
+.visual-editor .milkdown .ProseMirror .tagged-equation .katex-tag {
+  visibility: hidden;
+}
+
+.visual-editor .milkdown .ProseMirror .tagged-equation .tools-button-group {
+  margin-right: 52px;
+}
+
+.visual-editor .milkdown .ProseMirror .tagged-equation::after {
+  content: attr(data-equation-tag);
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font: .88em/1 KaTeX_Main, "Times New Roman", serif;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block.equation-target {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.visual-editor .milkdown .ProseMirror blockquote {
+  margin: 1.2em 0;
+  padding: .1em 1em;
+  border-left: 4px solid var(--border);
+  color: var(--muted);
+}
+
+.visual-editor .milkdown .ProseMirror blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+.visual-editor .milkdown .ProseMirror hr {
+  height: 1px;
+  margin: 2em 0;
+  border: 0;
+  background: var(--border);
+}
+
+.visual-editor .milkdown .ProseMirror :not(pre) > code {
+  padding: .15em .35em;
+  border-radius: 3px;
+  color: var(--danger);
+  background: var(--inline-code);
+  font: .88em/1.5 var(--mono);
+}
+
+.visual-editor .milkdown .ProseMirror table {
+  width: 100%;
+  margin: 1.25em 0;
+  border-collapse: collapse;
+  font-size: .94em;
+}
+
+.visual-editor .milkdown .ProseMirror th,
+.visual-editor .milkdown .ProseMirror td {
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+
+.visual-editor .milkdown .ProseMirror th {
+  background: var(--subtle);
+  font-weight: 600;
+}
+
+.visual-editor .milkdown .ProseMirror img {
+  max-width: 100%;
+}
+
+.visual-editor-loading {
+  width: min(70%, 560px);
+  height: 22px;
+  margin: 48px auto;
+  border-radius: 5px;
+  background: var(--subtle);
+}
+
+.visual-editor-fallback {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 44px max(32px, calc((100% - 820px) / 2)) 100px;
+  color: var(--editor-text);
+  background: var(--editor);
+  font: 15.5px/1.72 var(--mono);
+}
+
+.statusbar {
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 12px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.document-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats { gap: 14px; }
+.visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+.fatal-error {
+  max-width: 520px;
+  margin: 15vh auto;
+  padding: 32px;
+  text-align: center;
+}
+.fatal-error button { padding: 8px 14px; background: var(--accent); color: white; }
+
+@media (max-width: 900px) {
+  .app { grid-template-rows: 42px 44px minmax(0, 1fr) 26px; }
+  .app.mode-visual { grid-template-rows: 42px minmax(0, 1fr) 26px; }
+  .document-actions span { display: none; }
+  .topbar { padding: 0 9px; gap: 5px; }
+  .topbar button { padding: 0 7px; }
+  .formatbar { padding: 0 9px; overflow-x: auto; }
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .workspace.has-sidebar { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { display: none; }
+  .editor-shell { grid-template-columns: 38px minmax(0, 1fr); }
+  .line-numbers { --source-top-padding: 24px; }
+  .editor-shell textarea { grid-column: 2; padding: 26px 20px; font-size: 15px; }
+  .visual-editor .milkdown .ProseMirror { padding: 34px 22px 74px; font-size: 16.5px; }
+  .visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) {
+    padding: 4px 22px;
+  }
+  .visual-editor .milkdown .ProseMirror .milkdown-code-block.tagged-equation:has(.katex-display) {
+    padding-left: 54px;
+    padding-right: 54px;
+  }
+  .stats span:nth-child(2), .stats span:nth-child(4), .document-name { display: none; }
+}
