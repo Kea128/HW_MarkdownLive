@@ -1,5 +1,5 @@
 import { _electron as electron } from '@playwright/test'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -10,6 +10,13 @@ const executablePath = path.resolve(process.argv[2] ?? path.join(
   'win-unpacked',
   'Inkdown.exe',
 ))
+
+const { build } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
+const { owner, repo } = build.publish.find(({ provider }) => provider === 'github')
+const updateConfig = await readFile(path.join(path.dirname(executablePath), 'resources', 'app-update.yml'), 'utf8')
+if (!['provider: github', `owner: ${owner}`, `repo: ${repo}`].every((line) => updateConfig.includes(line))) {
+  throw new Error(`打包版在线更新配置无效: ${updateConfig}`)
+}
 
 const profile = await mkdtemp(path.join(tmpdir(), 'inkdown-packaged-smoke-'))
 const app = await electron.launch({
@@ -39,7 +46,10 @@ try {
   if (result.katex !== 2 || result.display !== 1 || !result.fontLoaded || !result.css.includes('KaTeX')) {
     throw new Error(`打包版公式资源验证失败: ${JSON.stringify(result)}`)
   }
-  console.log(JSON.stringify({ executablePath, ...result }))
+  const helpMenu = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items
+    .find((item) => item.label.includes('帮助'))?.submenu?.items.map((item) => item.label) ?? [])
+  if (!helpMenu.includes('检查更新…')) throw new Error(`打包版缺少检查更新菜单: ${JSON.stringify(helpMenu)}`)
+  console.log(JSON.stringify({ executablePath, ...result, updateFeed: `github:${owner}/${repo}`, helpMenu }))
 } finally {
   await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })

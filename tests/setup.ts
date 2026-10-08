@@ -1,6 +1,12 @@
 import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
 
+// Node 25+ ships an experimental global localStorage that shadows jsdom's implementation.
+const { jsdom } = globalThis as typeof globalThis & { jsdom?: { window: Window } }
+if (jsdom) {
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: jsdom.window.localStorage })
+}
+
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: vi.fn().mockImplementation((query: string) => ({
@@ -38,5 +44,6 @@ Object.defineProperty(window, 'inkdown', {
       setTheme: vi.fn(async (theme) => theme),
     },
     external: { open: vi.fn(async () => true) },
+    updates: { onState: vi.fn(() => () => undefined) },
   },
 })

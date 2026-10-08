@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import {
-  IPC, type DocumentCommand, type DocumentSnapshot, type InkdownApi, type Theme, type ViewMode,
+  IPC, type DocumentCommand, type DocumentSnapshot, type InkdownApi, type Theme, type UpdateState,
+  type ViewMode,
 } from '../../src/contracts'
 
 function subscription<T>(channel: string, listener: (value: T) => void): () => void {
@@ -30,6 +31,9 @@ const api: InkdownApi = {
   },
   external: {
     open: (url) => ipcRenderer.invoke(IPC.externalOpen, url),
+  },
+  updates: {
+    onState: (listener) => subscription<UpdateState>(IPC.updateState, listener),
   },
 }
 

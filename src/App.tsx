@@ -11,7 +11,7 @@ import { createEquationLabel, getEquationDefinitions } from './equations'
 import { useDesktopDocument } from './hooks/useDesktopDocument'
 import { useSourceEditorActions } from './hooks/useSourceEditorActions'
 import { getDocumentStats, type EditorMode } from './utils'
-import type { Theme } from './contracts'
+import type { Theme, UpdateState } from './contracts'
 import './App.css'
 
 const WysiwygEditor = lazy(() => import('./WysiwygEditor'))
@@ -30,6 +30,13 @@ const lineSpacingOptions: Array<{ value: LineSpacing; label: string }> = [
   { value: 'relaxed', label: '宽松' },
 ]
 
+function describeUpdate(state: UpdateState): string | null {
+  if (state.phase === 'checking') return '正在检查更新…'
+  if (state.phase === 'downloading') return `正在下载 v${state.version}（${Math.floor(state.percent)}%）`
+  if (state.phase === 'downloaded') return `v${state.version} 已下载，退出时自动安装`
+  return null
+}
+
 function App() {
   const {
     document: activeDocument, status, updateContent, newDocument, openDocument,
@@ -37,6 +44,8 @@ function App() {
   } = useDesktopDocument()
   const [mode, setMode] = useState<EditorMode>('visual')
   const [theme, setTheme] = useState<Theme>('system')
+  const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' })
+  const updateMessage = describeUpdate(updateState)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [currentLine, setCurrentLine] = useState(1)
   const [lineSpacing, setLineSpacing] = useState<LineSpacing>(() => {
@@ -106,6 +115,8 @@ function App() {
     window.addEventListener('keydown', toggleSource)
     return () => window.removeEventListener('keydown', toggleSource)
   }, [])
+
+  useEffect(() => window.inkdown.updates.onState(setUpdateState), [])
 
   const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const modifier = event.ctrlKey || event.metaKey
@@ -320,7 +331,10 @@ function App() {
 
       {dragging && <div className="drop-overlay">释放以打开文档</div>}
       <footer className="statusbar" aria-live="polite">
-        <span>{status}</span>
+        <div className="status-messages">
+          <span>{status}</span>
+          {updateMessage && <span className="update-status">{updateMessage}</span>}
+        </div>
         <span className="document-name">{activeDocument.filePath ?? '尚未保存到磁盘'}</span>
         <div className="stats"><span>{stats.words} 字词</span><span>{stats.characters} 字符</span>
           <span>行 {currentLine}/{stats.lines}</span><span>约 {stats.readingMinutes} 分钟阅读</span></div>

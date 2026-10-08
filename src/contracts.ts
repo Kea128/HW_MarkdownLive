@@ -13,6 +13,7 @@ export const IPC = {
   themeChanged: 'theme:changed',
   themeSet: 'theme:set',
   externalOpen: 'external:open',
+  updateState: 'update:state',
 } as const
 
 export type ViewMode = 'visual' | 'source' | 'toggle'
@@ -20,6 +21,10 @@ export type Theme = 'system' | 'light' | 'dark'
 export type DocumentCommand =
   | { action: 'new' | 'open' | 'save' | 'saveAs' | 'close' }
   | { action: 'openPath'; filePath: string }
+export type UpdateState =
+  | { phase: 'idle' | 'checking' }
+  | { phase: 'downloading'; version: string; percent: number }
+  | { phase: 'downloaded'; version: string }
 
 export interface DocumentSnapshot {
   content: string
@@ -56,5 +61,8 @@ export interface InkdownApi {
   }
   external: {
     open(url: string): Promise<boolean>
+  }
+  updates: {
+    onState(listener: (state: UpdateState) => void): () => void
   }
 }

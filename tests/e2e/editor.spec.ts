@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { _electron as electron, expect, test } from '@playwright/test'
 
+const localElectron = path.resolve(
+  'node_modules', 'electron', 'dist',
+  process.platform === 'win32' ? 'electron.exe' : 'electron',
+)
+
 test('真实桌面进程完成打开、编辑、预览、菜单快捷键与覆盖保存', async () => {
   test.setTimeout(90_000)
   const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-'))
@@ -61,10 +66,6 @@ test('真实桌面进程完成打开、编辑、预览、菜单快捷键与覆�
     '```',
   ].join('\n')
   await writeFile(filePath, `\uFEFF${sample}`, 'utf8')
-  const localElectron = path.resolve(
-    'node_modules', 'electron', 'dist',
-    process.platform === 'win32' ? 'electron.exe' : 'electron',
-  )
   const app = await electron.launch({
     executablePath: existsSync(localElectron) ? localElectron : undefined,
     args: ['.', `--user-data-dir=${path.join(directory, 'profile')}`],
@@ -212,6 +213,37 @@ test('真实桌面进程完成打开、编辑、预览、菜单快捷键与覆�
       hasProcess: typeof (globalThis as { process?: unknown }).process,
     }))
     expect(security).toEqual({ hasRequire: 'undefined', hasProcess: 'undefined' })
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
+test('帮助菜单提供在线检查更新入口', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-update-'))
+  const app = await electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${path.join(directory, 'profile')}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  try {
+    await (await app.firstWindow()).waitForLoadState('domcontentloaded')
+    const helpItems = await app.evaluate(({ dialog, Menu }) => {
+      const messages: string[] = []
+      Object.assign(globalThis, { updateDialogMessages: messages })
+      dialog.showMessageBox = (async (...args: unknown[]) => {
+        messages.push((args.at(-1) as Electron.MessageBoxOptions).message)
+        return { response: 0, checkboxChecked: false }
+      }) as typeof dialog.showMessageBox
+      const help = Menu.getApplicationMenu()?.items.find((item) => item.label.includes('帮助'))
+      const check = help?.submenu?.items.find((item) => item.label === '检查更新…')
+      check?.click?.(check, undefined, {} as Electron.KeyboardEvent)
+      return help?.submenu?.items.map((item) => item.label) ?? []
+    })
+    expect(helpItems).toEqual(['检查更新…', '访问发布页面', '', '关于 Inkdown'])
+    await expect.poll(() => app.evaluate(() =>
+      (globalThis as { updateDialogMessages?: string[] }).updateDialogMessages)).toEqual(['开发版本不支持在线更新'])
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
     await new Promise((resolve) => setTimeout(resolve, 500))

@@ -13,7 +13,7 @@ export default defineConfig({
       reporter: ['text', 'html'],
       include: [
         'src/**/*.{ts,tsx}',
-        'electron/main/{file-service,validators,window-state,unsaved-decision}.ts',
+        'electron/main/{file-service,validators,window-state,unsaved-decision,update-policy,update-controller}.ts',
       ],
       exclude: ['src/main.tsx', 'src/contracts.ts', 'src/electron.d.ts'],
       thresholds: {

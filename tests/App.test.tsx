@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import type { DocumentCommand } from '../src/contracts'
+import type { DocumentCommand, UpdateState } from '../src/contracts'
 
 vi.mock('../src/WysiwygEditor', () => ({
   default: ({ markdown, onChange }: { markdown: string; onChange: (value: string) => void }) => (
@@ -170,6 +170,24 @@ describe('Inkdown 桌面编辑器', () => {
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
     await userEvent.click(screen.getByRole('button', { name: '切换明暗主题' }))
     expect(window.inkdown.view.setTheme).toHaveBeenCalledWith('light')
+  })
+
+  it('在状态栏显示在线更新进度', async () => {
+    let updateListener: ((state: UpdateState) => void) | undefined
+    vi.mocked(window.inkdown.updates.onState).mockImplementation((listener) => {
+      updateListener = listener
+      return () => undefined
+    })
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    act(() => updateListener?.({ phase: 'checking' }))
+    expect(screen.getByText('正在检查更新…')).toBeInTheDocument()
+    act(() => updateListener?.({ phase: 'downloading', version: '2.8.0', percent: 42.7 }))
+    expect(screen.getByText('正在下载 v2.8.0（42%）')).toBeInTheDocument()
+    act(() => updateListener?.({ phase: 'downloaded', version: '2.8.0' }))
+    expect(screen.getByText('v2.8.0 已下载，退出时自动安装')).toBeInTheDocument()
+    act(() => updateListener?.({ phase: 'idle' }))
+    expect(document.querySelector('.update-status')).not.toBeInTheDocument()
   })
 
   it('调整并记住排版行间距', async () => {

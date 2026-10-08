@@ -17,11 +17,12 @@ HTTP 服务或云端账号。
 - 可折叠文档大纲、源码行号、当前行提示、可调行间距、自动内容宽度和窄窗口布局
 - 中文路径、UTF-8 BOM、拖放打开、最近文件、窗口位置/尺寸恢复
 - 崩溃草稿保护（恢复为未命名文稿，不覆盖磁盘）和外部变更检测
+- “帮助 > 检查更新”从 GitHub Releases 在线升级；安装版下载校验后重启即可完成更新
 
 ## 架构与安全
 
 ```text
-electron/main/       窗口、菜单、文件服务、文档状态、设置、IPC
+electron/main/       窗口、菜单、文件服务、文档状态、设置、在线更新、IPC
 electron/preload/    contextBridge 固定白名单
 src/                 React renderer、组件、hooks、共享 IPC contracts
 tests/               单元、组件和 Playwright Electron E2E
@@ -30,7 +31,20 @@ tests/               单元、组件和 Playwright Electron E2E
 BrowserWindow 使用 `contextIsolation: true`、`nodeIntegration: false` 和 `sandbox: true`。
 渲染进程不能任意读取文件或执行命令；主进程验证 IPC 来源、文件扩展名、绝对路径、内容大小和外链协议。
 应用不加载远程页面，禁止 renderer 导航和新窗口。仅 `http:`、`https:`、`mailto:` 外链通过受控
-`shell.openExternal` 交给系统默认程序。
+`shell.openExternal` 交给系统默认程序。在线更新只在用户手动检查时由主进程访问 GitHub，renderer
+仍然没有网络权限；下载的安装包必须与 `latest.yml` 中的 SHA-512 一致才会运行。
+
+## 在线更新
+
+在“帮助 > 检查更新”中，Inkdown 通过 [electron-updater](https://www.electron.build/auto-update)
+读取 [GitHub Releases](https://github.com/Kea128/HW_MarkdownLive/releases) 的最新正式版本：
+
+- 安装版（NSIS）：确认后下载安装包，校验通过后提示“立即重启并更新”；选择“稍后”会在退出时自动安装。
+  重启前如有未保存的更改，会先弹出保存确认，取消即可继续编辑。
+- 便携版与 ZIP 版：无法原地替换程序文件，检查到新版本后打开对应的发布页面。
+- 启动时不会自动联网检查。网络或代理不可用时会提示原因，并可直接打开发布页面手动下载。
+
+2.6.0 及更早版本不包含更新程序，需要手动安装一次 2.7.0；之后的版本都可以在软件内升级。
 
 ## 数学公式
 
@@ -90,8 +104,23 @@ renderer 隔离。
 npm run release
 ```
 
-发布结果位于 `releases/Inkdown-v2.6.0-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
-ZIP、中文说明、CHANGELOG 和 SHA-256。发布目录不含源码、测试缓存或 `node_modules`。
-发布命令会先执行完整验证与打包版冒烟，成功后删除旧版本和 `release-build` 中间目录。
+发布结果位于 `releases/Inkdown-v2.7.0-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
+ZIP、在线更新描述文件 `latest.yml` 与差分 blockmap、中文说明、CHANGELOG 和 SHA-256。发布目录不含源码、
+测试缓存或 `node_modules`。发布命令会先执行完整验证与打包版冒烟，成功后删除旧版本和 `release-build` 中间目录。
 
 若未配置证书，产物仍会正常生成，但会明确标记为“未代码签名”；Windows SmartScreen 可能显示未知发布者。
+
+### 发布到 GitHub
+
+提交发布内容并推送同名版本标签后，上传 Release：
+
+```powershell
+git tag -a v2.7.0 -m "Inkdown 2.7.0"
+git push origin main v2.7.0
+npm run publish:github
+```
+
+脚本会确认工作区干净、远端标签指向当前提交，并校验 SHA-256 与 `latest.yml` 中的 SHA-512，然后以草稿
+创建 Release、上传安装包、blockmap、便携版、ZIP 和 `SHA256SUMS.txt`，最后上传 `latest.yml` 并公开发布，
+避免客户端读到尚未上传完成的版本。凭据优先读取 `GH_TOKEN` 或 `GITHUB_TOKEN`，否则复用 git 已保存的
+github.com 凭据；需要代理时先设置 `HTTPS_PROXY`。

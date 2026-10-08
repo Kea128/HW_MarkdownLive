@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import {
   app,
@@ -10,16 +11,21 @@ import {
   screen,
   shell,
   type MenuItemConstructorOptions,
+  type MessageBoxOptions,
 } from 'electron'
-import { IPC, type Theme, type ViewMode } from '../../src/contracts'
+import { autoUpdater } from 'electron-updater'
+import { IPC, type Theme, type UpdateState, type ViewMode } from '../../src/contracts'
 import { DocumentController } from './document-controller'
 import { FileService } from './file-service'
 import { SettingsStore } from './settings-store'
+import { UpdateController } from './update-controller'
+import { detectInstallKind, RELEASES_URL } from './update-policy'
 import { isDocumentContent, isDocumentPath, isSafeExternalUrl } from './validators'
 import { restoreBounds } from './window-state'
 
 let mainWindow: BrowserWindow | null = null
 let documents: DocumentController
+let updates: UpdateController
 let settings: SettingsStore
 let quitting = false
 let externalPromptActive = false
@@ -39,6 +45,14 @@ const setAppTheme = (theme: Theme) => {
   send(IPC.themeChanged, theme)
   buildMenu()
   return theme
+}
+const showMessage = (options: MessageBoxOptions) =>
+  mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options)
+const updateMenuLabels: Record<UpdateState['phase'], string> = {
+  idle: '检查更新…',
+  checking: '正在检查更新…',
+  downloading: '正在下载更新…',
+  downloaded: '重启并安装更新…',
 }
 
 async function createWindow(): Promise<void> {
@@ -73,6 +87,24 @@ async function createWindow(): Promise<void> {
     (filePath) => void settings.addRecent(filePath).then(() => buildMenu()),
   )
   documentsReady = true
+  updates = new UpdateController({
+    updater: autoUpdater,
+    kind: detectInstallKind({
+      isPackaged: app.isPackaged,
+      execPath: process.execPath,
+      env: process.env,
+      exists: existsSync,
+    }),
+    currentVersion: app.getVersion(),
+    showMessageBox: showMessage,
+    openExternal: (url) => shell.openExternal(url),
+    confirmQuit: () => documents.confirmDiscard(),
+    onState: (state, previous) => {
+      send(IPC.updateState, state)
+      mainWindow?.setProgressBar(state.phase === 'downloading' ? state.percent / 100 : -1)
+      if (state.phase !== previous.phase) buildMenu()
+    },
+  })
 
   registerIpc()
   buildMenu()
@@ -170,6 +202,7 @@ function buildMenu(): void {
     checked: nativeTheme.themeSource === value,
     click: () => setAppTheme(value),
   })
+  const updatePhase = updates.state().phase
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     {
       label: '文件(&F)',
@@ -211,7 +244,34 @@ function buildMenu(): void {
         { role: 'resetZoom', label: '重置缩放' }, { role: 'togglefullscreen', label: '全屏' },
       ],
     },
+    {
+      label: '帮助(&H)',
+      submenu: [
+        {
+          label: updateMenuLabels[updatePhase],
+          enabled: updatePhase === 'idle' || updatePhase === 'downloaded',
+          click: () => void updates.check(),
+        },
+        { label: '访问发布页面', click: () => void shell.openExternal(RELEASES_URL) },
+        { type: 'separator' },
+        { label: '关于 Inkdown', click: () => void showAbout() },
+      ],
+    },
   ]))
+}
+
+function showAbout(): Promise<unknown> {
+  return showMessage({
+    type: 'info',
+    title: '关于 Inkdown',
+    message: `Inkdown v${app.getVersion()}`,
+    detail: [
+      '安全、本地优先的 Windows Markdown 实时编辑器。',
+      `Electron ${process.versions.electron} · Chromium ${process.versions.chrome} · Node.js ${process.versions.node}`,
+    ].join('\n\n'),
+    buttons: ['确定'],
+    noLink: true,
+  })
 }
 
 function startExternalChangeMonitor(): void {

@@ -14,6 +14,7 @@ dist-electron
 release-build
 releases/**/*.exe
 releases/**/*.zip
+releases/**/*.blockmap
 coverage
 test-results
 playwright-report
