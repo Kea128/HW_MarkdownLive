@@ -107,7 +107,7 @@ let release = existing
 for (const name of assets) {
   const data = read(name)
   const uploaded = release.assets.find((asset) => asset.name === name)
-  if (uploaded?.state === 'uploaded' && uploaded.size === data.length) {
+  if (uploaded?.state === 'uploaded' && uploaded.digest === `sha256:${digest('sha256', data, 'hex')}`) {
     console.log(`跳过 ${name}（已存在）`)
     continue
   }
