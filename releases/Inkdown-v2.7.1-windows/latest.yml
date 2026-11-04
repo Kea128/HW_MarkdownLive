@@ -1,0 +1,19 @@
+version: 2.7.1
+files:
+  - url: Inkdown-2.7.1-x64-setup.exe
+    sha512: VWsoIOyItqeyCftpeNAoMOPscM/uXfipJ1SM14RqJmGhwjX81u6ke2viBv5N+LkxwSxzD0iRcqiWr9u3F7th2g==
+    size: 101542478
+path: Inkdown-2.7.1-x64-setup.exe
+sha512: VWsoIOyItqeyCftpeNAoMOPscM/uXfipJ1SM14RqJmGhwjX81u6ke2viBv5N+LkxwSxzD0iRcqiWr9u3F7th2g==
+releaseDate: '2026-11-04T08:18:17.059Z'
+releaseNotes: |-
+  在线更新
+  • 修复代理服务器要求身份验证时，“检查更新”一直停留在检查中、无法再次检查的问题，现在会明确提示原因。
+  • 检查超过 60 秒仍未完成时自动结束并提示超时，可以立即重新检查。
+  • 下载更新期间可通过“帮助 > 取消下载更新”中止；发现新版本时显示安装包大小。
+  • 软件内的更新说明改为整洁的纯文本，过长时按整行截断。
+  • 更新模块改为首次检查时才加载，每次启动少加载约 0.2 秒的主进程模块。
+  • 读屏软件不再每秒播报下载进度。
+  发布与验证
+  • 更新说明由 CHANGELOG 生成并写入 latest.yml，2.7.0 也能显示整洁的更新内容。
+  • 打包版冒烟测试确认更新模块不在启动时加载，并能从安装包内正常载入。

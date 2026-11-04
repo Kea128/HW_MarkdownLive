@@ -333,7 +333,11 @@ function App() {
       <footer className="statusbar" aria-live="polite">
         <div className="status-messages">
           <span>{status}</span>
-          {updateMessage && <span className="update-status">{updateMessage}</span>}
+          {updateMessage && (
+            <span className="update-status" aria-live={updateState.phase === 'downloading' ? 'off' : undefined}>
+              {updateMessage}
+            </span>
+          )}
         </div>
         <span className="document-name">{activeDocument.filePath ?? '尚未保存到磁盘'}</span>
         <div className="stats"><span>{stats.words} 字词</span><span>{stats.characters} 字符</span>

@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { changelogSection } from './changelog.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const { version, build } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -37,12 +38,7 @@ function verifyArtifacts() {
 }
 
 function releaseNotes() {
-  const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8')
-  const start = changelog.indexOf(`## [${version}]`)
-  if (start === -1) throw new Error(`CHANGELOG.md 缺少 ${version} 的版本说明`)
-  const bodyStart = changelog.indexOf('\n', start) + 1
-  const end = changelog.indexOf('\n## [', bodyStart)
-  return `${changelog.slice(bodyStart, end === -1 ? undefined : end).trim()}
+  return `${changelogSection(readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), version)}
 
 ## 下载
 

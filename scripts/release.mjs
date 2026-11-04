@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { cpSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { changelogSection, updateNotes, withReleaseNotes } from './changelog.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const { version, build } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -17,12 +18,15 @@ const artifacts = readdirSync(buildOutput)
   .filter((name) => name.startsWith(`Inkdown-${version}-`) && /\.(?:exe|zip|blockmap)$/i.test(name))
   .sort()
 if (!artifacts.includes(setup)) throw new Error('未找到 Windows 安装包')
-const updateFeed = readFileSync(join(buildOutput, 'latest.yml'), 'utf8')
+const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8')
+const updateFeed = withReleaseNotes(
+  readFileSync(join(buildOutput, 'latest.yml'), 'utf8'),
+  updateNotes(changelogSection(changelog, version)),
+)
 const feedValue = (key) => new RegExp(`^${key}: (.+?)\\r?$`, 'm').exec(updateFeed)?.[1]
 if (feedValue('version') !== version || feedValue('path') !== setup) {
   throw new Error('latest.yml 与当前安装包不一致')
 }
-artifacts.push('latest.yml')
 
 for (const entry of readdirSync(releaseRoot)) {
   if (entry !== basename(output) && /^Inkdown-v.+-(?:windows|web)$/i.test(entry)) {
@@ -33,6 +37,7 @@ rmSync(output, { recursive: true, force: true })
 mkdirSync(output, { recursive: true })
 
 for (const artifact of artifacts) cpSync(join(buildOutput, artifact), join(output, artifact))
+writeFileSync(join(output, 'latest.yml'), updateFeed, 'utf8')
 for (const entry of readdirSync(buildOutput)) {
   if (/^Inkdown-\d+\.\d+\.\d+-.*\.(?:exe|zip|blockmap)$/i.test(entry) && !artifacts.includes(entry)) {
     rmSync(join(buildOutput, entry), { force: true })
@@ -53,7 +58,7 @@ Inkdown 是本地 Markdown 实时编辑器，不需要 Web 服务器或浏览器
 ## 在线更新
 
 - 安装版：通过“帮助 > 检查更新”获取 GitHub 上的最新正式版本；确认后自动下载并校验 SHA-512，
-  重启即可完成升级，也可以选择在退出 Inkdown 时自动安装。
+  重启即可完成升级，也可以选择在退出 Inkdown 时自动安装。下载期间可通过“帮助 > 取消下载更新”中止。
 - 便携版与 ZIP：检查到新版本时会打开发布页面，请下载后手动替换。
 - 更新源：${releasesUrl}
 - 仅在手动检查更新时访问网络；网络受限时请确认系统代理可以访问 GitHub。
@@ -73,9 +78,9 @@ Inkdown 是本地 Markdown 实时编辑器，不需要 Web 服务器或浏览器
 本项目仅参考 Typora 公开可见的低干扰写作理念；未下载、复制或逆向其私有源码和品牌资产。
 `, 'utf8')
 
-writeFileSync(join(output, 'CHANGELOG.md'), readFileSync(join(root, 'CHANGELOG.md'), 'utf8'), 'utf8')
+writeFileSync(join(output, 'CHANGELOG.md'), changelog, 'utf8')
 
-const checksums = [...artifacts, '安装与运行说明.md', 'CHANGELOG.md'].map((name) => {
+const checksums = [...artifacts, 'latest.yml', '安装与运行说明.md', 'CHANGELOG.md'].map((name) => {
   const digest = createHash('sha256').update(readFileSync(join(output, name))).digest('hex')
   return `${digest}  ${name}`
 })

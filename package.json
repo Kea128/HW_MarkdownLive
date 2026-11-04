@@ -1,7 +1,7 @@
 {
   "name": "inkdown",
   "private": true,
-  "version": "2.7.0",
+  "version": "2.7.1",
   "description": "安全、本地优先的 Windows Markdown 实时编辑器",
   "author": "Inkdown Contributors",
   "homepage": "https://github.com/Kea128/HW_MarkdownLive",

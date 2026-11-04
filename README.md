@@ -39,10 +39,11 @@ BrowserWindow 使用 `contextIsolation: true`、`nodeIntegration: false` 和 `sa
 在“帮助 > 检查更新”中，Inkdown 通过 [electron-updater](https://www.electron.build/auto-update)
 读取 [GitHub Releases](https://github.com/Kea128/HW_MarkdownLive/releases) 的最新正式版本：
 
-- 安装版（NSIS）：确认后下载安装包，校验通过后提示“立即重启并更新”；选择“稍后”会在退出时自动安装。
-  重启前如有未保存的更改，会先弹出保存确认，取消即可继续编辑。
+- 安装版（NSIS）：确认后下载安装包，下载期间可通过“帮助 > 取消下载更新”中止；校验通过后提示
+  “立即重启并更新”，选择“稍后”会在退出时自动安装。重启前如有未保存的更改，会先弹出保存确认，取消即可继续编辑。
 - 便携版与 ZIP 版：无法原地替换程序文件，检查到新版本后打开对应的发布页面。
-- 启动时不会自动联网检查。网络或代理不可用时会提示原因，并可直接打开发布页面手动下载。
+- 启动时不会自动联网检查，更新模块也只在首次检查时加载。检查超过 60 秒、网络或代理不可用、代理要求
+  身份验证时会结束检查并提示原因，可直接打开发布页面手动下载。
 
 2.6.0 及更早版本不包含更新程序，需要手动安装一次 2.7.0；之后的版本都可以在软件内升级。
 
@@ -104,9 +105,11 @@ renderer 隔离。
 npm run release
 ```
 
-发布结果位于 `releases/Inkdown-v2.7.0-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
+发布结果位于 `releases/Inkdown-v2.7.1-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
 ZIP、在线更新描述文件 `latest.yml` 与差分 blockmap、中文说明、CHANGELOG 和 SHA-256。发布目录不含源码、
 测试缓存或 `node_modules`。发布命令会先执行完整验证与打包版冒烟，成功后删除旧版本和 `release-build` 中间目录。
+软件内“发现新版本”显示的更新内容取自 CHANGELOG 中对应版本的段落，转换为纯文本并按整行控制在 560 字以内
+后写入 `latest.yml`，因此请把面向用户的改动写在该段落前部。
 
 若未配置证书，产物仍会正常生成，但会明确标记为“未代码签名”；Windows SmartScreen 可能显示未知发布者。
 
@@ -115,8 +118,8 @@ ZIP、在线更新描述文件 `latest.yml` 与差分 blockmap、中文说明、
 提交发布内容并推送同名版本标签后，上传 Release：
 
 ```powershell
-git tag -a v2.7.0 -m "Inkdown 2.7.0"
-git push origin main v2.7.0
+git tag -a v2.7.1 -m "Inkdown 2.7.1"
+git push origin main v2.7.1
 npm run publish:github
 ```
 

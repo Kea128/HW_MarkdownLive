@@ -13,7 +13,6 @@ import {
   type MenuItemConstructorOptions,
   type MessageBoxOptions,
 } from 'electron'
-import { autoUpdater } from 'electron-updater'
 import { IPC, type Theme, type UpdateState, type ViewMode } from '../../src/contracts'
 import { DocumentController } from './document-controller'
 import { FileService } from './file-service'
@@ -51,7 +50,7 @@ const showMessage = (options: MessageBoxOptions) =>
 const updateMenuLabels: Record<UpdateState['phase'], string> = {
   idle: '检查更新…',
   checking: '正在检查更新…',
-  downloading: '正在下载更新…',
+  downloading: '取消下载更新',
   downloaded: '重启并安装更新…',
 }
 
@@ -88,7 +87,10 @@ async function createWindow(): Promise<void> {
   )
   documentsReady = true
   updates = new UpdateController({
-    updater: autoUpdater,
+    loadUpdater: async () => {
+      const { autoUpdater, CancellationToken } = await import('electron-updater')
+      return { updater: autoUpdater, createCancellationToken: () => new CancellationToken() }
+    },
     kind: detectInstallKind({
       isPackaged: app.isPackaged,
       execPath: process.execPath,
@@ -249,8 +251,11 @@ function buildMenu(): void {
       submenu: [
         {
           label: updateMenuLabels[updatePhase],
-          enabled: updatePhase === 'idle' || updatePhase === 'downloaded',
-          click: () => void updates.check(),
+          enabled: updatePhase !== 'checking',
+          click: () => {
+            if (updatePhase === 'downloading') updates.cancelDownload()
+            else void updates.check()
+          },
         },
         { label: '访问发布页面', click: () => void shell.openExternal(RELEASES_URL) },
         { type: 'separator' },

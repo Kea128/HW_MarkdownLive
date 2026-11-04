@@ -1,7 +1,7 @@
-22589e3be6ae4b140bb3d57bf253c2aacf5218a5014f0fd75f15f6ff7cac9c7e  Inkdown-v2.7.0-windows/Inkdown-2.7.0-x64-portable.exe
-8d05c9f4540f07d2ca6f81134a06b889809e8c18e6634ccafbfcd6d2d37c1ea7  Inkdown-v2.7.0-windows/Inkdown-2.7.0-x64-setup.exe
-35211024e33274f24401711c6ea5fa87301eb6e225ef514b02474a95f6fbaea4  Inkdown-v2.7.0-windows/Inkdown-2.7.0-x64-setup.exe.blockmap
-ca733dd3b02292142c3e625b3b871adf9a3b6cdc18a7a3b5eaa827878859b769  Inkdown-v2.7.0-windows/Inkdown-2.7.0-x64.zip
-6a9d99e89e4befe66946e68fda85036e57dd36cec3ac5f0e41c6ce6fb7147281  Inkdown-v2.7.0-windows/latest.yml
-c429f5c057fe5fefab5126c469a99d024e1ff7f937652f259aa2fcbb0087d2cf  Inkdown-v2.7.0-windows/安装与运行说明.md
-b34aea6fd5e5b759cd35759cb691c71942242dddbe01fc2c4d4f637735b6c202  Inkdown-v2.7.0-windows/CHANGELOG.md
+eb8a954dc8ba02864172e8a8fadb09272d7be2f6cda5fc830acadb81433b4175  Inkdown-v2.7.1-windows/Inkdown-2.7.1-x64-portable.exe
+5c8fb9b74fd1d456050ae1d303bc99fa0896ff3705b9d197bd17eed0d4291fb7  Inkdown-v2.7.1-windows/Inkdown-2.7.1-x64-setup.exe
+29d65a3ad91f775d6cee89a9411ccc5d6541ba4aed4b8b26eac273a0d6c3a65a  Inkdown-v2.7.1-windows/Inkdown-2.7.1-x64-setup.exe.blockmap
+2b507200c8f7273da1fcef91f7746e276dce5178c50eac3d939ff70097e623a9  Inkdown-v2.7.1-windows/Inkdown-2.7.1-x64.zip
+fbb64054056881480826a2eb0678f0a3edd826c7fdec8af5ded36a637cdf03f1  Inkdown-v2.7.1-windows/latest.yml
+523a12c8bf5602917767cd4a0c14ad4ae375fbcfed4a2bb7c082feece337d468  Inkdown-v2.7.1-windows/安装与运行说明.md
+e6de9b6336623795f2e0a05fc5f0b5d5daa7f0b66366be061ec8f4eb347ee9e8  Inkdown-v2.7.1-windows/CHANGELOG.md

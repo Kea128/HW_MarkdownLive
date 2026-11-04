@@ -1,9 +1,12 @@
 import type { MessageBoxOptions } from 'electron'
-import type { ProgressInfo, UpdateInfo } from 'electron-updater'
+import type { CancellationToken, LoginHandler, ProgressInfo, UpdateInfo } from 'electron-updater'
 import type { UpdateState } from '../../src/contracts'
 import {
-  describeUpdateError, releaseNotesToText, releasePageUrl, RELEASES_URL, type InstallKind,
+  describeUpdateError, formatDownloadSize, releaseNotesToText, releasePageUrl, RELEASES_URL,
+  UPDATE_TIMEOUT_CODE, type InstallKind,
 } from './update-policy'
+
+const CHECK_TIMEOUT_MS = 60_000
 
 export interface Updater {
   autoDownload: boolean
@@ -11,36 +14,48 @@ export interface Updater {
   disableWebInstaller: boolean
   checkForUpdates(): Promise<{
     isUpdateAvailable: boolean
-    updateInfo: Pick<UpdateInfo, 'version' | 'releaseNotes'>
+    updateInfo: Pick<UpdateInfo, 'version' | 'releaseNotes' | 'files'>
   } | null>
-  downloadUpdate(): Promise<unknown>
+  downloadUpdate(cancellationToken?: CancellationToken): Promise<unknown>
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void
   on(event: 'download-progress', listener: (info: ProgressInfo) => void): unknown
+  on(event: 'login', listener: LoginHandler): unknown
+}
+
+export interface UpdaterModule {
+  updater: Updater
+  createCancellationToken(): CancellationToken
 }
 
 export interface UpdateControllerOptions {
-  updater: Updater
+  loadUpdater(): Promise<UpdaterModule>
   kind: InstallKind
   currentVersion: string
+  checkTimeoutMs?: number
   showMessageBox(options: MessageBoxOptions): Promise<{ response: number }>
   openExternal(url: string): Promise<unknown>
   confirmQuit(): Promise<boolean>
   onState(state: UpdateState, previous: UpdateState): void
 }
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(Object.assign(
+      new Error(`检查更新超过 ${Math.round(timeoutMs / 1000)} 秒仍未完成`),
+      { code: UPDATE_TIMEOUT_CODE },
+    )), timeoutMs)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
 export class UpdateController {
   private value: UpdateState = { phase: 'idle' }
   private running = false
+  private updaterModule?: Promise<UpdaterModule>
+  private downloadToken?: CancellationToken
 
-  constructor(private readonly options: UpdateControllerOptions) {
-    const { updater } = options
-    updater.autoDownload = false
-    updater.autoInstallOnAppQuit = true
-    updater.disableWebInstaller = true
-    updater.on('download-progress', ({ percent }) => {
-      if (this.value.phase === 'downloading') this.setState({ ...this.value, percent })
-    })
-  }
+  constructor(private readonly options: UpdateControllerOptions) {}
 
   state(): UpdateState {
     return this.value
@@ -57,12 +72,37 @@ export class UpdateController {
     }
   }
 
+  cancelDownload(): void {
+    this.downloadToken?.cancel()
+  }
+
+  private loadUpdater(): Promise<UpdaterModule> {
+    this.updaterModule ??= this.options.loadUpdater().then((loaded) => {
+      const { updater } = loaded
+      updater.autoDownload = false
+      updater.autoInstallOnAppQuit = true
+      updater.disableWebInstaller = true
+      updater.on('download-progress', ({ percent }) => {
+        if (this.value.phase === 'downloading') this.setState({ ...this.value, percent })
+      })
+      // Without a credentials prompt the request must be released: calling back with no arguments
+      // cancels proxy authentication, whereas never calling back leaves the request pending forever.
+      updater.on('login', (_authInfo, callback) => (callback as () => void)())
+      return loaded
+    }, (error: unknown) => {
+      this.updaterModule = undefined
+      throw error
+    })
+    return this.updaterModule
+  }
+
   private async checkAndOffer(): Promise<void> {
     if (this.options.kind === 'development') return this.showUnsupported()
     this.setState({ phase: 'checking' })
     let result: Awaited<ReturnType<Updater['checkForUpdates']>>
     try {
-      result = await this.options.updater.checkForUpdates()
+      const { updater } = await this.loadUpdater()
+      result = await withTimeout(updater.checkForUpdates(), this.options.checkTimeoutMs ?? CHECK_TIMEOUT_MS)
     } catch (error) {
       this.setState({ phase: 'idle' })
       return this.showError('检查更新失败', error)
@@ -71,15 +111,18 @@ export class UpdateController {
     if (!result) return this.showUnsupported()
     if (!result.isUpdateAvailable) return this.showUpToDate()
 
-    const { version, releaseNotes } = result.updateInfo
+    const { version, releaseNotes, files } = result.updateInfo
     const installable = this.options.kind === 'installed'
     const notes = releaseNotesToText(releaseNotes)
+    const size = formatDownloadSize(files?.find(({ url }) => url.endsWith('.exe'))?.size)
     const { response } = await this.options.showMessageBox({
       type: 'info',
       title: '发现新版本',
       message: `发现新版本 Inkdown v${version}`,
       detail: [
-        `当前版本：v${this.options.currentVersion}`,
+        installable && size
+          ? `当前版本：v${this.options.currentVersion}，安装包约 ${size}`
+          : `当前版本：v${this.options.currentVersion}`,
         installable ? '' : '便携版和 ZIP 版无法自动替换程序文件，请下载新版本后手动替换。',
         notes && `更新内容：\n${notes}`,
       ].filter(Boolean).join('\n\n'),
@@ -97,12 +140,16 @@ export class UpdateController {
   }
 
   private async download(version: string): Promise<void> {
+    const { updater, createCancellationToken } = await this.loadUpdater()
+    const token = createCancellationToken()
+    this.downloadToken = token
     this.setState({ phase: 'downloading', version, percent: 0 })
     try {
-      await this.options.updater.downloadUpdate()
+      await updater.downloadUpdate(token).finally(() => { this.downloadToken = undefined })
     } catch (error) {
       this.setState({ phase: 'idle' })
-      return this.showError('下载更新失败', error)
+      if (!token.cancelled) await this.showError('下载更新失败', error)
+      return
     }
     this.setState({ phase: 'downloaded', version })
     await this.promptInstall(version)
@@ -120,7 +167,8 @@ export class UpdateController {
       noLink: true,
     })
     if (response !== 0 || !(await this.options.confirmQuit())) return
-    this.options.updater.quitAndInstall(true, true)
+    const { updater } = await this.loadUpdater()
+    updater.quitAndInstall(true, true)
   }
 
   private async showUpToDate(): Promise<void> {

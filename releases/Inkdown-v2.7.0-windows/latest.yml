@@ -1,8 +1,0 @@
-version: 2.7.0
-files:
-  - url: Inkdown-2.7.0-x64-setup.exe
-    sha512: sfhYqhSEKf9e1YazU3jFS4Os/qKXyHC5fxRuqhjZqImWe5afkiYbTcBjB8tH4sP0fbQRF3a2IGf7lpoKNz4ynQ==
-    size: 101541773
-path: Inkdown-2.7.0-x64-setup.exe
-sha512: sfhYqhSEKf9e1YazU3jFS4Os/qKXyHC5fxRuqhjZqImWe5afkiYbTcBjB8tH4sP0fbQRF3a2IGf7lpoKNz4ynQ==
-releaseDate: '2026-10-08T02:13:13.201Z'

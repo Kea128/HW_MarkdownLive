@@ -11,7 +11,7 @@ const executablePath = path.resolve(process.argv[2] ?? path.join(
   'Inkdown.exe',
 ))
 
-const { build } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
+const { version, build } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
 const { owner, repo } = build.publish.find(({ provider }) => provider === 'github')
 const updateConfig = await readFile(path.join(path.dirname(executablePath), 'resources', 'app-update.yml'), 'utf8')
 if (!['provider: github', `owner: ${owner}`, `repo: ${repo}`].every((line) => updateConfig.includes(line))) {
@@ -49,7 +49,20 @@ try {
   const helpMenu = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items
     .find((item) => item.label.includes('帮助'))?.submenu?.items.map((item) => item.label) ?? [])
   if (!helpMenu.includes('检查更新…')) throw new Error(`打包版缺少检查更新菜单: ${JSON.stringify(helpMenu)}`)
-  console.log(JSON.stringify({ executablePath, ...result, updateFeed: `github:${owner}/${repo}`, helpMenu }))
+  const updater = await app.evaluate(() => {
+    const loadedAtStartup = Object.keys(process.mainModule.constructor._cache)
+      .some((file) => file.includes('electron-updater'))
+    const { autoUpdater, CancellationToken } = process.mainModule.require('electron-updater')
+    return {
+      loadedAtStartup,
+      version: autoUpdater.currentVersion.version,
+      cancellable: typeof CancellationToken === 'function',
+    }
+  })
+  if (updater.loadedAtStartup || updater.version !== version || !updater.cancellable) {
+    throw new Error(`打包版更新模块异常: ${JSON.stringify(updater)}`)
+  }
+  console.log(JSON.stringify({ executablePath, ...result, updateFeed: `github:${owner}/${repo}`, helpMenu, updater }))
 } finally {
   await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
   await rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })

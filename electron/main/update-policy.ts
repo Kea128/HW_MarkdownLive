@@ -1,6 +1,7 @@
 import path from 'node:path'
 
 export const RELEASES_URL = 'https://github.com/Kea128/HW_MarkdownLive/releases'
+export const UPDATE_TIMEOUT_CODE = 'ERR_UPDATE_TIMEOUT'
 
 export type InstallKind = 'installed' | 'portable' | 'archive' | 'development'
 
@@ -57,7 +58,13 @@ export function releaseNotesToText(notes: ReleaseNotes, maxLength = 600): string
     .map((line) => line.trim())
     .filter(Boolean)
     .join('\n')
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1).trimEnd()}…` : text
+  if (text.length <= maxLength) return text
+  const lineEnd = text.lastIndexOf('\n', maxLength - 1)
+  return lineEnd > 0 ? `${text.slice(0, lineEnd)}\n…` : `${text.slice(0, maxLength - 1).trimEnd()}…`
+}
+
+export function formatDownloadSize(bytes: number | undefined): string | null {
+  return bytes && Number.isFinite(bytes) ? `${Math.max(1, Math.round(bytes / 1024 / 1024))} MB` : null
 }
 
 export function describeUpdateError(error: unknown): UpdateErrorDescription {
@@ -69,6 +76,10 @@ export function describeUpdateError(error: unknown): UpdateErrorDescription {
   const detail = `错误信息：${text.split('\n')[0].trim().slice(0, 300) || '未知错误'}`
   const explain = (message: string) => ({ message, detail })
 
+  if (code === UPDATE_TIMEOUT_CODE) return explain('连接 GitHub 超时，请检查网络或代理设置后重试。')
+  if (statusCode === 407 || /net::ERR_PROXY_AUTH/.test(text)) {
+    return explain('代理服务器要求身份验证，请检查系统代理设置或联系网络管理员。')
+  }
   if (NETWORK_ERROR.test(text)) return explain('无法连接到 GitHub，请检查网络或代理设置后重试。')
   if (code === 'ERR_CHECKSUM_MISMATCH' || /checksum mismatch/i.test(text)) {
     return explain('下载的安装包未通过完整性校验，已停止更新。')
