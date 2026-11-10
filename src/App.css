@@ -395,6 +395,7 @@ button svg {
 }
 
 .visual-pane {
+  overflow-x: hidden;
   background: var(--surface);
 }
 
@@ -433,7 +434,8 @@ button svg {
 
 .visual-editor .milkdown .ProseMirror {
   min-height: 100%;
-  padding: 50px clamp(24px, 4vw, 56px) 96px;
+  /* The block handle is 66px wide plus a 6px offset and flips outside the editor without this gutter. */
+  padding: 50px clamp(72px, 6vw, 96px) 96px;
   color: var(--text);
   font-size: 17px;
   font-weight: 400;
@@ -508,7 +510,7 @@ button svg {
   white-space: nowrap;
 }
 
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) {
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display) {
   position: relative;
   scroll-margin-top: 88px;
   margin: .6em 0;
@@ -520,13 +522,13 @@ button svg {
   transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
 }
 
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within {
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):hover,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):focus-within {
   border-color: color-mix(in srgb, var(--border) 72%, transparent);
   background: color-mix(in srgb, var(--subtle) 30%, transparent);
 }
 
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .katex-display {
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display) .katex-display {
   max-width: 100%;
   margin: .12em 0;
   overflow-x: auto;
@@ -534,32 +536,32 @@ button svg {
   font-size: 1em;
 }
 
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .tools,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .language-picker,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .preview-label,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .preview-divider {
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display) .tools,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display) .language-picker,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display) .preview-label,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display) .preview-divider {
   opacity: 0;
   transition: opacity .16s ease;
 }
 
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) .tools {
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display) .tools {
   position: absolute;
   z-index: 2;
   inset: 5px 8px auto;
   pointer-events: none;
 }
 
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover .tools,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within .tools,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover .language-picker,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within .language-picker,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover .preview-label,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within .preview-label {
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):hover .tools,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):focus-within .tools,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):hover .language-picker,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):focus-within .language-picker,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):hover .preview-label,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):focus-within .preview-label {
   opacity: 1;
 }
 
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):hover .tools,
-.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display):focus-within .tools {
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):hover .tools,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display):focus-within .tools {
   pointer-events: auto;
 }
 
@@ -567,7 +569,7 @@ button svg {
   font-size: 1em;
 }
 
-.visual-editor .milkdown .ProseMirror .milkdown-code-block.tagged-equation:has(.katex-display) {
+.visual-editor .milkdown .ProseMirror .milkdown-code-block.tagged-equation:has(.preview > .katex-display) {
   padding-left: 68px;
   padding-right: 68px;
 }
@@ -597,6 +599,72 @@ button svg {
   border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.mermaid-diagram, .mermaid-error) {
+  position: relative;
+  margin: .8em 0;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  transition: border-color .2s ease, background .2s ease;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.mermaid-diagram, .mermaid-error):hover,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.mermaid-diagram, .mermaid-error):focus-within {
+  border-color: color-mix(in srgb, var(--border) 72%, transparent);
+  background: color-mix(in srgb, var(--subtle) 30%, transparent);
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.mermaid-diagram, .mermaid-error):has(.codemirror-host.hidden) .tools {
+  position: absolute;
+  z-index: 2;
+  inset: 5px 8px auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .16s ease;
+}
+
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.mermaid-diagram, .mermaid-error):has(.codemirror-host.hidden):hover .tools,
+.visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.mermaid-diagram, .mermaid-error):has(.codemirror-host.hidden):focus-within .tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.visual-editor .milkdown .ProseMirror .mermaid-diagram {
+  overflow-x: auto;
+}
+
+.visual-editor .milkdown .ProseMirror .mermaid-diagram svg {
+  display: block;
+  height: auto;
+  margin: 0 auto;
+}
+
+.visual-editor .milkdown .ProseMirror .mermaid-dark,
+:root[data-theme="dark"] .visual-editor .milkdown .ProseMirror .mermaid-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .visual-editor .milkdown .ProseMirror .mermaid-dark {
+  display: block;
+}
+
+.visual-editor .milkdown .ProseMirror .mermaid-error {
+  padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, var(--danger) 55%, transparent);
+  border-radius: 6px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 6%, transparent);
+  font-size: 13px;
+}
+
+.visual-editor .milkdown .ProseMirror .mermaid-error pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font: 12px/1.6 var(--mono);
 }
 
 .visual-editor .milkdown .ProseMirror blockquote {
@@ -724,10 +792,10 @@ button svg {
   .line-numbers { --source-top-padding: 24px; }
   .editor-shell textarea { grid-column: 2; padding: 26px 20px; font-size: 15px; }
   .visual-editor .milkdown .ProseMirror { padding: 34px 22px 74px; font-size: 16.5px; }
-  .visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.katex-display) {
+  .visual-editor .milkdown .ProseMirror .milkdown-code-block:has(.preview > .katex-display) {
     padding: 4px 22px;
   }
-  .visual-editor .milkdown .ProseMirror .milkdown-code-block.tagged-equation:has(.katex-display) {
+  .visual-editor .milkdown .ProseMirror .milkdown-code-block.tagged-equation:has(.preview > .katex-display) {
     padding-left: 54px;
     padding-right: 54px;
   }

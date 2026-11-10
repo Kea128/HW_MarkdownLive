@@ -220,6 +220,75 @@ test('真实桌面进程完成打开、编辑、预览、菜单快捷键与覆�
   }
 })
 
+test('Mermaid 图表在排版视图中渲染、跟随主题并提示语法错误', async () => {
+  test.setTimeout(90_000)
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-mermaid-'))
+  const filePath = path.join(directory, '图表.md')
+  await writeFile(filePath, [
+    '# 图表',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  A[开始] --> B{是否完成？}',
+    '  B -- 是 --> C[发布]',
+    '```',
+    '',
+    '```mermaid',
+    'sequenceDiagram',
+    '  Alice->>Bob: 你好',
+    '  Bob-->>Alice: 收到',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart LR',
+    '  A -->',
+    '```',
+  ].join('\n'), 'utf8')
+  const app = await electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${path.join(directory, 'profile')}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  try {
+    const page = await app.firstWindow()
+    const consoleErrors: string[] = []
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text())
+    })
+    await page.waitForLoadState('domcontentloaded')
+    await app.evaluate(({ Menu }) => {
+      const view = Menu.getApplicationMenu()?.items.find((item) => item.label.includes('视图'))
+      const light = view?.submenu?.items.find((item) => item.label === '主题')
+        ?.submenu?.items.find((item) => item.label === '浅色')
+      light?.click?.(light, undefined, {} as Electron.KeyboardEvent)
+    })
+    await page.evaluate((target) => window.inkdown.document.openPath(target), filePath)
+
+    const diagrams = page.locator('.mermaid-diagram')
+    await expect(diagrams).toHaveCount(2, { timeout: 30_000 })
+    const flowchart = diagrams.first().locator('.mermaid-light svg')
+    await expect(flowchart).toBeVisible()
+    await expect(flowchart).toContainText('开始')
+    await expect(diagrams.first().locator('.mermaid-dark svg')).toBeHidden()
+    await expect(diagrams.nth(1).locator('.mermaid-light svg')).toContainText('你好')
+    const size = await flowchart.boundingBox()
+    expect(size!.width).toBeGreaterThan(150)
+    expect(size!.height).toBeGreaterThan(30)
+    await expect(page.locator('.mermaid-error')).toContainText('Mermaid 图表无法渲染')
+    await expect(page.locator('.milkdown-code-block .preview-toggle-button').first()).toContainText('编辑')
+
+    await page.getByRole('button', { name: '切换明暗主题' }).click()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
+    await expect(diagrams.first().locator('.mermaid-dark svg')).toBeVisible()
+    await expect(flowchart).toBeHidden()
+    expect(consoleErrors.filter((text) => /Content Security Policy|Refused to|EvalError/i.test(text))).toEqual([])
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
 test('帮助菜单提供在线检查更新入口', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-update-'))
   const app = await electron.launch({

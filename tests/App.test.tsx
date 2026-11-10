@@ -149,6 +149,19 @@ describe('Inkdown 桌面编辑器', () => {
     expect(editor.value).toContain('[式 @formula-1](#eq-formula-1)')
   })
 
+  it('在源码模式插入可编辑的 Mermaid 图表模板', async () => {
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    toggleSource()
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 源码' }) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    await userEvent.click(screen.getByRole('button', { name: '插入 Mermaid 图表' }))
+    expect(editor.value).toBe('# 初始文稿\n\n```mermaid\nflowchart LR\n  A[开始] --> B{是否完成？}\n'
+      + '  B -- 是 --> C[发布]\n  B -- 否 --> D[继续修改]\n```')
+    await waitFor(() => expect(editor.value.slice(editor.selectionStart, editor.selectionEnd))
+      .toMatch(/^flowchart LR\n[\s\S]*继续修改\]$/))
+  })
+
   it('响应主进程视图和主题事件', async () => {
     let modeListener: ((mode: 'visual' | 'source' | 'toggle') => void) | undefined
     let themeListener: ((theme: 'system' | 'light' | 'dark') => void) | undefined

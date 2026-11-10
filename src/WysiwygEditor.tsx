@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { languages } from '@codemirror/language-data'
 import { Crepe } from '@milkdown/crepe'
 import { replaceAll } from '@milkdown/kit/utils'
 import { prepareEquationMarkdown, restoreEquationMarkdown } from './equations'
 import { decorateEquationBlocks, hasEquationMutation } from './equation-decoration'
 import { normalizeMathDelimiters } from './markdown'
+import { mermaidLanguage } from './mermaid-language'
+import { isMermaidLanguage, renderMermaidPreview } from './mermaid-preview'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
 import 'katex/dist/katex.min.css'
@@ -65,8 +68,21 @@ export default function WysiwygEditor({ markdown, onChange }: Props) {
           text: '开始写作…',
           mode: 'block',
         },
+        [Crepe.Feature.BlockEdit]: {
+          blockHandle: { getOffset: () => 6 },
+        },
         [Crepe.Feature.CodeMirror]: {
           previewOnlyByDefault: true,
+          languages: [...languages, mermaidLanguage],
+          renderPreview: (language, content, applyPreview) => isMermaidLanguage(language) && content.trim()
+            ? renderMermaidPreview(content, applyPreview)
+            : null,
+          copyText: '复制',
+          previewToggleText: (previewOnly) => previewOnly ? '编辑' : '隐藏',
+          previewLabel: '预览',
+          previewLoading: '正在渲染图表…',
+          searchPlaceholder: '搜索语言',
+          noResultText: '没有匹配的语言',
         },
         [Crepe.Feature.Latex]: {
           katexOptions: {

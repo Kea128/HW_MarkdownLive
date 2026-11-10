@@ -5,7 +5,7 @@ import {
 import {
   Bold, Braces, CheckSquare, Code2, Eye, FilePlus2, FolderOpen,
   Image, Italic, Link, List, ListOrdered, Minus, Moon, PanelLeftClose, PanelLeftOpen,
-  Quote, Save, SaveAll, Sigma, Strikethrough, Sun, Table2, Text,
+  Quote, Save, SaveAll, Sigma, Strikethrough, Sun, Table2, Text, Workflow,
 } from 'lucide-react'
 import { createEquationLabel, getEquationDefinitions } from './equations'
 import { useDesktopDocument } from './hooks/useDesktopDocument'
@@ -16,6 +16,7 @@ import './App.css'
 
 const WysiwygEditor = lazy(() => import('./WysiwygEditor'))
 const SOURCE_LINE_HEIGHT = 28
+const MERMAID_SAMPLE = 'flowchart LR\n  A[开始] --> B{是否完成？}\n  B -- 是 --> C[发布]\n  B -- 否 --> D[继续修改]'
 
 const modes: Array<{ mode: EditorMode; label: string; icon: typeof Eye }> = [
   { mode: 'visual', label: '所见即所得', icon: Eye },
@@ -247,6 +248,8 @@ function App() {
           <button type="button" onClick={() => applyFormat('`', '`', '代码')} title="行内代码" aria-label="插入行内代码"><Braces /></button>
           <button className="badged-tool" type="button" onClick={() => applyBlockFormat('```text\n', '\n```', '代码')}
             title="代码块" aria-label="插入代码块"><Code2 /><small>块</small></button>
+          <button type="button" onClick={() => applyBlockFormat('```mermaid\n', '\n```', MERMAID_SAMPLE)}
+            title="Mermaid 图表" aria-label="插入 Mermaid 图表"><Workflow /></button>
           <button type="button" onClick={() => applyFormat('$', '$', 'E = mc^2')} title="行内公式" aria-label="插入行内公式"><Sigma /></button>
           <button className="badged-tool" type="button" onClick={() => {
             const label = createEquationLabel(activeDocument.content)

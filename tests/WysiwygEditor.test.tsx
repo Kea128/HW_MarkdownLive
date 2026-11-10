@@ -8,10 +8,16 @@ const crepeState = vi.hoisted(() => ({
   blur: undefined as undefined | (() => void),
   action: vi.fn(),
   destroy: vi.fn(),
+  featureConfigs: {} as Record<string, Record<string, unknown>>,
 }))
 
 vi.mock('@milkdown/kit/utils', () => ({
   replaceAll: vi.fn((markdown: string) => ({ markdown })),
+}))
+
+vi.mock('../src/mermaid-preview', () => ({
+  isMermaidLanguage: (language: string) => language.toLowerCase() === 'mermaid',
+  renderMermaidPreview: vi.fn(() => undefined),
 }))
 
 vi.mock('@milkdown/crepe', () => {
@@ -22,13 +28,19 @@ vi.mock('@milkdown/crepe', () => {
       CodeMirror: 'CodeMirror',
       Toolbar: 'Toolbar',
       Placeholder: 'Placeholder',
+      BlockEdit: 'BlockEdit',
     }
     editor = { action: crepeState.action }
     private root: HTMLElement
 
-    constructor(options: { root: HTMLElement; defaultValue: string }) {
+    constructor(options: {
+      root: HTMLElement
+      defaultValue: string
+      featureConfigs: Record<string, Record<string, unknown>>
+    }) {
       this.root = options.root
       crepeState.markdown = options.defaultValue
+      crepeState.featureConfigs = options.featureConfigs
     }
 
     on(register: (listener: {
@@ -59,6 +71,7 @@ vi.mock('@milkdown/crepe', () => {
 })
 
 import WysiwygEditor from '../src/WysiwygEditor'
+import { renderMermaidPreview } from '../src/mermaid-preview'
 
 describe('WysiwygEditor 生命周期', () => {
   beforeEach(() => {
@@ -85,6 +98,28 @@ describe('WysiwygEditor 生命周期', () => {
     await waitFor(() => expect(crepeState.action).toHaveBeenCalled())
     unmount()
     expect(crepeState.destroy).toHaveBeenCalledOnce()
+  })
+
+  it('为 mermaid 代码块提供图表预览、语言选项和中文操作文案', async () => {
+    render(<WysiwygEditor markdown="# 初始" onChange={vi.fn()} />)
+    await screen.findByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    const codeMirror = crepeState.featureConfigs.CodeMirror as {
+      languages: Array<{ name: string }>
+      renderPreview: (language: string, content: string, apply: (value: string | null) => void) => unknown
+      previewToggleText: (previewOnly: boolean) => string
+      copyText: string
+    }
+    const apply = vi.fn()
+    expect(codeMirror.renderPreview('ts', 'const a = 1', apply)).toBeNull()
+    expect(codeMirror.renderPreview('Mermaid', '   ', apply)).toBeNull()
+    expect(codeMirror.renderPreview('Mermaid', 'flowchart LR\n  A --> B', apply)).toBeUndefined()
+    expect(renderMermaidPreview).toHaveBeenCalledWith('flowchart LR\n  A --> B', apply)
+    expect(codeMirror.languages.at(-1)?.name).toBe('mermaid')
+    expect(codeMirror.languages.some(({ name }) => name === 'TypeScript')).toBe(true)
+    expect([codeMirror.copyText, codeMirror.previewToggleText(true), codeMirror.previewToggleText(false)])
+      .toEqual(['复制', '编辑', '隐藏'])
+    const blockEdit = crepeState.featureConfigs.BlockEdit as { blockHandle: { getOffset: () => number } }
+    expect(blockEdit.blockHandle.getOffset()).toBe(6)
   })
 
   it('拦截安全外链并遵循减少动态效果设置', async () => {
