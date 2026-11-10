@@ -1,7 +1,7 @@
-48e370e2c2c07c4c8f4620fa4a8cc784fd0b99441d1536a31e489fab709ae04d  Inkdown-v2.8.0-windows/Inkdown-2.8.0-x64-portable.exe
-07127435b4c6332118b9063b0fefd060a0345b36207d237302d016f09c95f78f  Inkdown-v2.8.0-windows/Inkdown-2.8.0-x64-setup.exe
-b29d87a2e86e800dbaf99c1ff021fc77e32eda6221d40190800cfeff88fcdec7  Inkdown-v2.8.0-windows/Inkdown-2.8.0-x64-setup.exe.blockmap
-f1bbb4c4189864d1c8cc1e6c629cb33c80bd849d311855d9c0e4e5b9b09b6d8c  Inkdown-v2.8.0-windows/Inkdown-2.8.0-x64.zip
-361407cc6004bb285d6a0e2b3fa85ef484264e131da0acb7527bbf415c273322  Inkdown-v2.8.0-windows/latest.yml
-a16fd988b0a43077c46246a4c067f3f7e028e2ae8b51c7a218745bcb2248a35f  Inkdown-v2.8.0-windows/安装与运行说明.md
-52d65feeb836c0c04268d343a5491017243147814f7327dafe31691ec1eb89cd  Inkdown-v2.8.0-windows/CHANGELOG.md
+6459d14a9a43271f21d8698ee4b5c96bb4272e2cd80c15d024b95138f8aaf8ef  Inkdown-v2.8.1-windows/Inkdown-2.8.1-x64-portable.exe
+08502a6d2f7c85e63c3038a189da995a9da694fbba4d8d13fd5c47c2e99ad6db  Inkdown-v2.8.1-windows/Inkdown-2.8.1-x64-setup.exe
+9e25e4a88a8a2ac03e3df4d11d93e4a878e0f1b36ff7be57d81c1618f465a2c0  Inkdown-v2.8.1-windows/Inkdown-2.8.1-x64-setup.exe.blockmap
+b2429f9bd16ec5dbc8af22baaeaede52a2630fee9c8ebc0a0f4db7bce27c9ad8  Inkdown-v2.8.1-windows/Inkdown-2.8.1-x64.zip
+5a7eab6beaaba28f23523c98164897cc847edc8d64bad7403018360ba2a95a52  Inkdown-v2.8.1-windows/latest.yml
+685489b2f464a30fa0ed66d54e86fc85722581e3797fa07a71d7eaebfda7fc0f  Inkdown-v2.8.1-windows/安装与运行说明.md
+ec8e08b6e7b9e52497e96bdf7e25fc3b63d4bc31a976f39b65d80278f19d7550  Inkdown-v2.8.1-windows/CHANGELOG.md

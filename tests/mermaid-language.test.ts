@@ -32,6 +32,7 @@ describe('Mermaid 代码高亮', () => {
       '"A":string',
       '42:number',
     ])
+    expect(tokens('railroad-ebnf-beta\nusecase-beta')).toEqual(['railroad-ebnf-beta:keyword', 'usecase-beta:keyword'])
     expect(tokens('flowchart LR\n  step_1[开始] -.-> B')).toEqual([
       'flowchart:keyword',
       '[:punctuation',

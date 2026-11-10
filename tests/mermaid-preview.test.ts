@@ -4,6 +4,15 @@ const mermaid = vi.hoisted(() => ({
   initialize: vi.fn(),
   parse: vi.fn(async () => ({ diagramType: 'flowchart-v2' })),
   render: vi.fn(async (id: string) => ({ svg: `<svg id="${id}"></svg>` })),
+  mermaidAPI: {
+    defaultConfig: {
+      theme: 'default',
+      fontSize: 16,
+      flowchart: { theme: 'redux-color', look: 'neo' },
+      sequence: { theme: 'redux-color' },
+      gantt: { useMaxWidth: true },
+    },
+  },
 }))
 
 vi.mock('mermaid', () => ({ default: mermaid }))
@@ -28,7 +37,7 @@ describe('Mermaid 图表预览', () => {
     expect(['mermaid-js', 'ts', ''].some(isMermaidLanguage)).toBe(false)
   })
 
-  it('以严格安全级别分别渲染浅色和深色图表', async () => {
+  it('以严格安全级别分别渲染浅色和深色图表，深色沿用各图表类型对应的暗色主题', async () => {
     const { renderMermaidPreview } = await loadPreview()
     const apply = vi.fn()
     expect(renderMermaidPreview('flowchart LR\n  A --> B', apply)).toBeUndefined()
@@ -37,9 +46,15 @@ describe('Mermaid 图表预览', () => {
       '<div class="mermaid-diagram"><div class="mermaid-variant mermaid-light"><svg id="inkdown-mermaid-1"></svg></div>'
       + '<div class="mermaid-variant mermaid-dark"><svg id="inkdown-mermaid-2"></svg></div></div>',
     )
-    expect(mermaid.initialize.mock.calls.map(([config]) => [config.theme, config.securityLevel, config.startOnLoad]))
-      .toEqual([['default', 'strict', false], ['dark', 'strict', false]])
-    expect(mermaid.initialize.mock.calls[0][0]).toMatchObject({ suppressErrorRendering: true, fontFamily: expect.any(String) })
+    const [[light], [dark]] = mermaid.initialize.mock.calls
+    const base = { startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true, fontFamily: expect.any(String) }
+    expect(light).toEqual(base)
+    expect(dark).toEqual({
+      ...base,
+      theme: 'dark',
+      flowchart: { theme: 'redux-dark-color' },
+      sequence: { theme: 'redux-dark-color' },
+    })
   })
 
   it('空闲时直接返回缓存，避免重复渲染', async () => {

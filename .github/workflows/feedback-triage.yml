@@ -1,0 +1,29 @@
+name: 反馈分类
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  label:
+    if: startsWith(github.event.issue.title, '[反馈]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts
+            src
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 按类型、功能和关键词打标签
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: node scripts/feedback-report.mjs --label-issue "$ISSUE_NUMBER"

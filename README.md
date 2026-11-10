@@ -13,17 +13,49 @@ HTTP 服务或云端账号。
 - 当前路径、文件名、脏状态和标题 `*`；关闭/新建/打开前保存确认
 - 保存和文件切换前强制同步最后一次编辑，避免快速操作写入旧内容
 - GFM、任务列表、表格、安全链接、代码高亮、KaTeX 数学公式和 XSS 白名单净化
-- Mermaid 11.15.0 图表：流程图、时序图、类图、甘特图、思维导图等，跟随明暗主题
+- Mermaid 12.3.0 图表：流程图、时序图、类图、甘特图、思维导图、用例图等，跟随明暗主题
 - 单栏所见即所得编辑，按 `Ctrl+/` 在排版视图与 Markdown 源码间切换
-- 可折叠文档大纲、源码行号、当前行提示、可调行间距、自动内容宽度和窄窗口布局
+- 打开文件夹（`Ctrl+Shift+O`）后在侧栏浏览并打开其中所有 Markdown 文件
+- 可拖动调整宽度的侧栏（文件 / 大纲）、源码行号、当前行提示、紧凑/标准/宽松三档排版和窄窗口布局
 - 中文路径、UTF-8 BOM、拖放打开、最近文件、窗口位置/尺寸恢复
 - 崩溃草稿保护（恢复为未命名文稿，不覆盖磁盘）和外部变更检测
 - “帮助 > 检查更新”从 GitHub Releases 在线升级；安装版下载校验后重启即可完成更新
+- “帮助 > 意见反馈”收集问题与建议，自动分类后提交到 GitHub 或复制发送
+
+## 文件夹与侧栏
+
+- 点击工具栏的“打开文件夹”或使用“文件 > 打开文件夹…”，侧栏“文件”页会列出该文件夹及子文件夹中的
+  `.md`、`.markdown` 文件（跳过隐藏目录、`node_modules` 和不含 Markdown 的目录），点击即可打开，当前文档高亮显示。
+- 文件夹在下次启动时自动恢复；在其他程序中新增或删除文件后，切回 Inkdown 窗口即自动刷新，也可点击刷新按钮。
+- 拖动侧栏右边缘调整宽度；聚焦分隔条后可用方向键（按住 Shift 加大步长）、Home/End 调整，双击恢复默认宽度。
+- 为避免卡顿，单个文件夹最多列出 2000 个文件、8 层子目录，超出时会在侧栏提示。
+
+## 意见反馈
+
+“帮助 > 意见反馈…”或工具栏的反馈按钮打开反馈表单：
+
+1. **收集**：选择反馈类型（问题报告、功能建议、体验与界面、性能、其他）和涉及的功能，填写标题与详细描述。
+   反馈只包含填写的内容，不附带正在编辑的文档；勾选后才附带应用版本与系统信息，联系方式不会公开到 GitHub。
+2. **提交**：“提交到 GitHub”在浏览器中打开已预填的 [反馈表单](.github/ISSUE_TEMPLATE/feedback.yml)，确认后提交；
+   无法访问 GitHub 时选择“复制内容”，以 Markdown 形式发给开发者。
+3. **存储**：每条反馈同时以 JSON Lines 追加到本机 `%APPDATA%\Inkdown\feedback\feedback.jsonl`，包含类型、功能、
+   自动标签和指纹（类型 + 功能 + 标签），可随时导出汇总。
+4. **分类**：类型、功能和标签的定义统一存放在 [`src/feedback-taxonomy.json`](src/feedback-taxonomy.json)。
+   应用按其中的关键词自动识别标签，GitHub 上的反馈由
+   [`feedback-triage`](.github/workflows/feedback-triage.yml) 工作流打上 `type:`、`area:`、`tag:` 标签，便于筛选。
+5. **提取共性**：运行汇总脚本生成 Markdown 报告。报告按“功能 · 标签”聚合多次出现的主题，按类型权重、崩溃或
+   内容丢失加权以及 👍 数排序，列出高频词与代表反馈，并按标题相似度标出疑似重复反馈：
+
+```powershell
+npm run feedback:report -- --out feedback-report.md            # GitHub 上未关闭的反馈
+npm run feedback:report -- --all --local --out feedback-report.md   # 含已关闭反馈和本机记录
+npm run feedback:report -- --jsonl 收集到的\feedback.jsonl     # 汇总他人发来的记录文件
+```
 
 ## 架构与安全
 
 ```text
-electron/main/       窗口、菜单、文件服务、文档状态、设置、在线更新、IPC
+electron/main/       窗口、菜单、文件服务、文档状态、设置、文件夹扫描、意见反馈、在线更新、IPC
 electron/preload/    contextBridge 固定白名单
 src/                 React renderer、组件、hooks、共享 IPC contracts
 tests/               单元、组件和 Playwright Electron E2E
@@ -31,6 +63,7 @@ tests/               单元、组件和 Playwright Electron E2E
 
 BrowserWindow 使用 `contextIsolation: true`、`nodeIntegration: false` 和 `sandbox: true`。
 渲染进程不能任意读取文件或执行命令；主进程验证 IPC 来源、文件扩展名、绝对路径、内容大小和外链协议。
+文件夹列表只扫描用户在系统对话框中选择的文件夹，renderer 无法指定扫描路径。
 应用不加载远程页面，禁止 renderer 导航和新窗口。仅 `http:`、`https:`、`mailto:` 外链通过受控
 `shell.openExternal` 交给系统默认程序。在线更新只在用户手动检查时由主进程访问 GitHub，renderer
 仍然没有网络权限；下载的安装包必须与 `latest.yml` 中的 SHA-512 一致才会运行。
@@ -83,7 +116,7 @@ $$
 
 ## Mermaid 图表
 
-使用语言标记为 `mermaid` 的代码块绘制图表，内置 [Mermaid](https://mermaid.js.org/) 11.15.0：
+使用语言标记为 `mermaid` 的代码块绘制图表，内置 [Mermaid](https://mermaid.js.org/) 12.3.0：
 
 ````markdown
 ```mermaid
@@ -96,10 +129,26 @@ flowchart LR
 
 - 排版视图直接显示图表；悬停图表后点击“编辑”，可在代码下方实时预览修改效果。源码模式工具栏的
   “Mermaid 图表”按钮会插入上面的模板，代码块的语言列表中也可以选择 `mermaid`。
-- 已在桌面端逐一验证流程图、时序图、类图、状态图、实体关系图、用户旅程、甘特图、饼图、象限图、需求图、
-  Git 图、C4、思维导图、时间线、桑基图、XY 图、块图、数据包图、看板、架构图、雷达图和矩形树图；
-  需要额外插件的 ZenUML 不在内置范围内。
-- 每张图同时生成浅色和深色版本，切换主题即时生效；语法错误会在原位置显示错误信息，不影响其他内容。
+- 已在桌面端逐一验证 32 种图表：流程图、时序图、类图、状态图、实体关系图、用户旅程、甘特图、饼图、象限图、
+  需求图、Git 图、C4、思维导图、时间线、桑基图、XY 图、块图、数据包图、看板、架构图、雷达图、矩形树图，以及
+  Mermaid 12 新增的用例图、泳道图、AgentFlow、鱼骨图、维恩图、Wardley 图、Cynefin、铁路图、树形视图和
+  事件建模；需要额外插件的 ZenUML 不在内置范围内。旧文档中带 `-beta` 后缀的写法继续有效。
+- 每张图同时生成浅色和深色版本，切换主题即时生效：浅色沿用 Mermaid 12 的默认配色，深色为默认使用 redux 调色板的
+  图表换用 `redux-dark-color`，其余使用 `dark`。语法错误会在原位置显示错误信息，不影响其他内容。
+- Mermaid 12 起，流程图、类图、状态图等默认使用 ELK 自动布局和 `neo` 风格。如需旧版的布局与样式，可在图表开头
+  加入 front matter：
+
+  ````markdown
+  ```mermaid
+  ---
+  config:
+    layout: dagre
+    look: classic
+  ---
+  flowchart LR
+    A[开始] --> B[完成]
+  ```
+  ````
 - 使用 Mermaid 的 `strict` 安全级别，标签中的 HTML 会被净化，脚本与点击回调被禁用。Mermaid 仅在文档中
   出现图表时加载，不影响启动速度；滚动回已渲染过的图表时直接复用结果。
 
@@ -119,8 +168,8 @@ npm run test:e2e
 npm run verify
 ```
 
-Electron E2E 会实际启动桌面进程，验证文件打开、所见即所得编辑、源码切换、菜单快捷键、脏状态、覆盖保存以及
-renderer 隔离。
+Electron E2E 会实际启动桌面进程，验证文件打开、所见即所得编辑、源码切换、菜单快捷键、脏状态、覆盖保存、
+打开文件夹、拖动侧栏、表格长代码换行、意见反馈以及 renderer 隔离。
 
 ## Windows 发布
 
@@ -128,7 +177,7 @@ renderer 隔离。
 npm run release
 ```
 
-发布结果位于 `releases/Inkdown-v2.8.0-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
+发布结果位于 `releases/Inkdown-v2.8.1-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
 ZIP、在线更新描述文件 `latest.yml` 与差分 blockmap、中文说明、CHANGELOG 和 SHA-256。发布目录不含源码、
 测试缓存或 `node_modules`。发布命令会先执行完整验证与打包版冒烟，成功后删除旧版本和 `release-build` 中间目录。
 软件内“发现新版本”显示的更新内容取自 CHANGELOG 中对应版本的段落，转换为纯文本并按整行控制在 560 字以内
@@ -141,8 +190,8 @@ ZIP、在线更新描述文件 `latest.yml` 与差分 blockmap、中文说明、
 提交发布内容并推送同名版本标签后，上传 Release：
 
 ```powershell
-git tag -a v2.8.0 -m "Inkdown 2.8.0"
-git push origin main v2.8.0
+git tag -a v2.8.1 -m "Inkdown 2.8.1"
+git push origin main v2.8.1
 npm run publish:github
 ```
 

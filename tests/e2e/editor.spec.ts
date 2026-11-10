@@ -81,15 +81,20 @@ test('真实桌面进程完成打开、编辑、预览、菜单快捷键与覆�
     await expect(page.locator('.milkdown-list-item-block .checked')).toHaveCount(1)
     await expect(visualEditor.locator('code').filter({ hasText: 'desktop' })).toContainText('desktop')
     const proseParagraph = visualEditor.locator('p').filter({ hasText: '安静、清晰的正文' })
+    const spacing = () => proseParagraph.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { lineHeight: Number.parseFloat(style.lineHeight), gap: Number.parseFloat(style.marginBottom) }
+    })
     await page.getByLabel('行间距').selectOption('compact')
-    const compactLineHeight = Number.parseFloat(await proseParagraph.evaluate(
-      (element) => getComputedStyle(element).lineHeight,
-    ))
+    const compact = await spacing()
+    await page.getByLabel('行间距').selectOption('standard')
+    const standard = await spacing()
     await page.getByLabel('行间距').selectOption('relaxed')
-    const relaxedLineHeight = Number.parseFloat(await proseParagraph.evaluate(
-      (element) => getComputedStyle(element).lineHeight,
-    ))
-    expect(relaxedLineHeight).toBeGreaterThan(compactLineHeight + 5)
+    const relaxed = await spacing()
+    expect(standard.lineHeight).toBeGreaterThan(compact.lineHeight + 4)
+    expect(relaxed.lineHeight).toBeGreaterThan(standard.lineHeight + 4)
+    expect(standard.gap).toBeGreaterThan(compact.gap + 5)
+    expect(relaxed.gap).toBeGreaterThan(standard.gap + 5)
     await page.getByLabel('行间距').selectOption('standard')
     await expect(page.locator('#eq-total .katex-display .katex')).not.toBeEmpty()
     await expect(page.locator('.katex math').first()).toBeAttached()
@@ -289,6 +294,108 @@ test('Mermaid 图表在排版视图中渲染、跟随主题并提示语法错误
   }
 })
 
+test('打开文件夹、拖动侧栏、表格长代码换行、源码铺满并提交意见反馈', async () => {
+  test.setTimeout(90_000)
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-folder-'))
+  const folder = path.join(directory, '笔记')
+  await mkdir(path.join(folder, '子目录'), { recursive: true })
+  await writeFile(path.join(folder, '表格.md'), [
+    '# 表格',
+    '',
+    '| 名称 | 说明 | 备注 |',
+    '| --- | --- | --- |',
+    '| `averyveryveryverylonginlinecodeidentifier_without_any_spaces_to_break_on` | '
+      + '`很长很长的中文行内代码内容用于验证单元格内换行而不会覆盖旁边列的文字` | 普通文字 |',
+    '| 普通 | `short` | 其他 |',
+  ].join('\n'), 'utf8')
+  await writeFile(path.join(folder, '子目录', '说明.md'), '# 说明\n\n子目录中的文档', 'utf8')
+  await writeFile(path.join(folder, '忽略.txt'), '不是 Markdown', 'utf8')
+  const profile = path.join(directory, 'profile')
+  const app = await electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${profile}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await app.evaluate(({ dialog, shell }, target) => {
+      const openedUrls: string[] = []
+      Object.assign(globalThis, { openedUrls })
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [target] })) as typeof dialog.showOpenDialog
+      shell.openExternal = async (url: string) => { openedUrls.push(url) }
+    }, folder)
+
+    await page.getByRole('button', { name: '打开文件夹', exact: true }).click()
+    const files = page.getByRole('navigation', { name: '文件夹中的 Markdown 文件' })
+    await expect(files.getByRole('button', { name: '说明.md' })).toBeVisible()
+    await expect(files.getByText('忽略.txt')).toHaveCount(0)
+    await files.getByRole('button', { name: '表格.md' }).click()
+    await expect(page.getByRole('heading', { name: '表格' })).toBeVisible()
+    await expect(files.getByRole('button', { name: '表格.md' })).toHaveAttribute('aria-current', 'page')
+    await page.waitForTimeout(600)
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+    await files.getByRole('button', { name: '说明.md' }).click()
+    await expect(page.getByRole('heading', { name: '说明' })).toBeVisible()
+    await files.getByRole('button', { name: '表格.md' }).click()
+    await expect(page.getByRole('heading', { name: '表格' })).toBeVisible()
+    await page.waitForTimeout(600)
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+
+    const sidebar = page.locator('.sidebar')
+    const before = (await sidebar.boundingBox())!.width
+    const handle = (await page.getByRole('separator', { name: '调整侧栏宽度' }).boundingBox())!
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + 240)
+    await page.mouse.down()
+    await page.mouse.move(handle.x + handle.width / 2 + 140, handle.y + 240, { steps: 8 })
+    await page.mouse.up()
+    await expect.poll(async () => (await sidebar.boundingBox())!.width).toBeGreaterThan(before + 120)
+    expect(Number(await page.evaluate(() => localStorage.getItem('inkdown-sidebar-width')))).toBeGreaterThan(before + 120)
+
+    const cells = await page.locator('.ProseMirror td').evaluateAll((elements) => elements.map((cell) => {
+      const bounds = cell.getBoundingClientRect()
+      return [...cell.querySelectorAll('code')].every((code) => {
+        const box = code.getBoundingClientRect()
+        return box.left >= bounds.left - 1 && box.right <= bounds.right + 1
+      })
+    }))
+    expect(cells.length).toBeGreaterThanOrEqual(6)
+    expect(cells.every(Boolean)).toBe(true)
+
+    await page.keyboard.press('Control+/')
+    const source = page.getByRole('textbox', { name: 'Markdown 源码' })
+    await expect(source).toBeVisible()
+    const sourceBox = (await source.boundingBox())!
+    const paneBox = (await page.locator('.editor-pane').boundingBox())!
+    expect(sourceBox.width).toBeGreaterThan(paneBox.width - 80)
+    await page.keyboard.press('Control+/')
+
+    await page.getByRole('button', { name: '意见反馈' }).click()
+    const dialog = page.getByRole('dialog', { name: '意见反馈' })
+    await dialog.getByLabel('涉及功能').selectOption('table')
+    await dialog.getByLabel(/^标题/).fill('表格长代码覆盖文字')
+    await dialog.getByLabel(/^详细描述/).fill('单元格里的行内代码重叠到右侧单元格')
+    await expect(dialog.locator('.feedback-tags')).toContainText('排版/样式')
+    await dialog.getByRole('button', { name: /提交到 GitHub/ }).click()
+    await expect(dialog.getByText('感谢你的反馈！')).toBeVisible()
+    const urls = await app.evaluate(() => (globalThis as { openedUrls?: string[] }).openedUrls ?? [])
+    expect(urls).toHaveLength(1)
+    const issue = new URL(urls[0])
+    expect(issue.origin + issue.pathname).toBe('https://github.com/Kea128/HW_MarkdownLive/issues/new')
+    expect(issue.searchParams.get('area')).toBe('表格')
+    expect(issue.searchParams.get('environment')).toContain('Electron')
+    const stored = (await readFile(path.join(profile, 'feedback', 'feedback.jsonl'), 'utf8')).trim().split('\n')
+    expect(stored).toHaveLength(1)
+    expect(JSON.parse(stored[0])).toMatchObject({
+      schema: 1, channel: 'github', type: 'bug', area: 'table', tags: ['layout', 'table'],
+    })
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
 test('帮助菜单提供在线检查更新入口', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-update-'))
   const app = await electron.launch({
@@ -310,7 +417,7 @@ test('帮助菜单提供在线检查更新入口', async () => {
       check?.click?.(check, undefined, {} as Electron.KeyboardEvent)
       return help?.submenu?.items.map((item) => item.label) ?? []
     })
-    expect(helpItems).toEqual(['检查更新…', '访问发布页面', '', '关于 Inkdown'])
+    expect(helpItems).toEqual(['检查更新…', '访问发布页面', '', '意见反馈…', '关于 Inkdown'])
     await expect.poll(() => app.evaluate(() =>
       (globalThis as { updateDialogMessages?: string[] }).updateDialogMessages)).toEqual(['开发版本不支持在线更新'])
   } finally {

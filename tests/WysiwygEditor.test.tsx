@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const crepeState = vi.hoisted(() => ({
   rejectCreate: false,
   markdown: '# 初始',
+  canonicalize: (markdown: string) => markdown,
   markdownUpdated: undefined as undefined | ((ctx: unknown, markdown: string) => void),
   blur: undefined as undefined | (() => void),
   action: vi.fn(),
@@ -59,7 +60,7 @@ vi.mock('@milkdown/crepe', () => {
     }
 
     getMarkdown() {
-      return crepeState.markdown
+      return crepeState.canonicalize(crepeState.markdown)
     }
 
     destroy() {
@@ -77,10 +78,36 @@ describe('WysiwygEditor 生命周期', () => {
   beforeEach(() => {
     crepeState.rejectCreate = false
     crepeState.markdown = '# 初始'
+    crepeState.canonicalize = (markdown) => markdown
     crepeState.markdownUpdated = undefined
     crepeState.blur = undefined
     crepeState.action.mockClear()
+    crepeState.action.mockImplementation((command?: { markdown?: string }) => {
+      if (typeof command?.markdown === 'string') crepeState.markdown = command.markdown
+    })
     crepeState.destroy.mockClear()
+  })
+
+  it('编辑器只是规范化载入的 Markdown 时不视为修改', async () => {
+    crepeState.canonicalize = (markdown) => markdown.replaceAll('|---|', '| --- |')
+    const onChange = vi.fn()
+    const { rerender } = render(<WysiwygEditor markdown={'| 列 |\n|---|\n| 甲 |'} onChange={onChange} />)
+    await screen.findByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    crepeState.markdownUpdated?.({}, '| 列 |\n| --- |\n| 甲 |')
+    crepeState.blur?.()
+    expect(onChange).not.toHaveBeenCalled()
+
+    crepeState.markdownUpdated?.({}, '| 列 |\n| --- |\n| 乙 |')
+    expect(onChange).toHaveBeenLastCalledWith('| 列 |\n| --- |\n| 乙 |')
+    crepeState.markdownUpdated?.({}, '| 列 |\n| --- |\n| 甲 |')
+    expect(onChange).toHaveBeenLastCalledWith('| 列 |\n|---|\n| 甲 |')
+
+    onChange.mockClear()
+    rerender(<WysiwygEditor markdown={'| 新 |\n|---|\n| 丙 |'} onChange={onChange} />)
+    await waitFor(() => expect(crepeState.action).toHaveBeenCalled())
+    crepeState.markdownUpdated?.({}, '| 新 |\n| --- |\n| 丙 |')
+    crepeState.blur?.()
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it('创建编辑器、发布变更并同步外部 Markdown', async () => {

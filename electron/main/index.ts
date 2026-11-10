@@ -1,9 +1,12 @@
 import path from 'node:path'
+import os from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { mkdir, stat } from 'node:fs/promises'
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
   ipcMain,
   Menu,
@@ -12,20 +15,30 @@ import {
   shell,
   type MenuItemConstructorOptions,
   type MessageBoxOptions,
+  type OpenDialogOptions,
 } from 'electron'
-import { IPC, type Theme, type UpdateState, type ViewMode } from '../../src/contracts'
+import {
+  IPC, type FeedbackResult, type Theme, type UpdateState, type ViewMode, type WorkspaceSnapshot,
+} from '../../src/contracts'
+import { createFeedbackRecord, feedbackIssueUrl, formatFeedback, validateFeedback } from '../../src/feedback'
 import { DocumentController } from './document-controller'
+import { appendFeedback } from './feedback-store'
 import { FileService } from './file-service'
 import { SettingsStore } from './settings-store'
 import { UpdateController } from './update-controller'
-import { detectInstallKind, RELEASES_URL } from './update-policy'
+import { detectInstallKind, RELEASES_URL, REPOSITORY_URL, type InstallKind } from './update-policy'
 import { isDocumentContent, isDocumentPath, isSafeExternalUrl } from './validators'
 import { restoreBounds } from './window-state'
+import { isInsideWorkspace, scanWorkspace, workspaceFiles } from './workspace'
 
 let mainWindow: BrowserWindow | null = null
 let documents: DocumentController
 let updates: UpdateController
 let settings: SettingsStore
+let installKind: InstallKind = 'development'
+let workspace: WorkspaceSnapshot | null = null
+let workspaceTask: Promise<unknown> = Promise.resolve()
+let workspaceScannedAt = 0
 let quitting = false
 let externalPromptActive = false
 let externalChangeTimer: NodeJS.Timeout | undefined
@@ -52,6 +65,108 @@ const updateMenuLabels: Record<UpdateState['phase'], string> = {
   checking: '正在检查更新…',
   downloading: '取消下载更新',
   downloaded: '重启并安装更新…',
+}
+const installKindLabels: Record<InstallKind, string> = {
+  installed: '安装版',
+  portable: '便携版',
+  archive: 'ZIP 版',
+  development: '开发版',
+}
+const feedbackFile = () => path.join(app.getPath('userData'), 'feedback', 'feedback.jsonl')
+
+function serializeWorkspace<T>(task: () => Promise<T>): Promise<T> {
+  const run = workspaceTask.then(task, task)
+  workspaceTask = run.catch(() => undefined)
+  return run
+}
+
+function applyWorkspace(snapshot: WorkspaceSnapshot | null): WorkspaceSnapshot | null {
+  const rootChanged = snapshot?.root !== workspace?.root
+  const changed = JSON.stringify(snapshot) !== JSON.stringify(workspace)
+  workspace = snapshot
+  if (changed) send(IPC.workspaceUpdated, snapshot)
+  if (rootChanged) buildMenu()
+  return snapshot
+}
+
+const openWorkspace = (root: string) => serializeWorkspace(async () => {
+  const snapshot = await scanWorkspace(root)
+  workspaceScannedAt = Date.now()
+  await settings.update({ workspaceFolder: snapshot.root })
+  return applyWorkspace(snapshot)
+})
+
+const closeWorkspace = () => serializeWorkspace(async () => {
+  await settings.update({ workspaceFolder: undefined })
+  applyWorkspace(null)
+  return null
+})
+
+const refreshWorkspace = () => serializeWorkspace(async () => {
+  const root = workspace?.root ?? settings.get().workspaceFolder
+  if (!root) return null
+  workspaceScannedAt = Date.now()
+  try {
+    return applyWorkspace(await scanWorkspace(root))
+  } catch {
+    return applyWorkspace(null)
+  }
+})
+
+async function chooseWorkspace(): Promise<WorkspaceSnapshot | null> {
+  const options: OpenDialogOptions = { title: '打开文件夹', properties: ['openDirectory'], defaultPath: workspace?.root }
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
+  const [root] = result.filePaths
+  if (result.canceled || !root) return workspace
+  try {
+    return await openWorkspace(root)
+  } catch (error) {
+    void showMessage({
+      type: 'error',
+      title: '无法打开文件夹',
+      message: '无法读取所选文件夹。',
+      detail: error instanceof Error ? error.message : String(error),
+    })
+    return workspace
+  }
+}
+
+function syncWorkspaceWith(filePath: string): void {
+  if (workspace && isInsideWorkspace(workspace.root, filePath) && !workspaceFiles(workspace.entries).includes(filePath)) {
+    void refreshWorkspace()
+  }
+}
+
+async function submitFeedback(input: unknown, channel: unknown): Promise<FeedbackResult> {
+  if (channel !== 'github' && channel !== 'copy') return { ok: false, error: '无效的提交方式' }
+  const validated = validateFeedback(input)
+  if (!validated.ok) return validated
+  const record = createFeedbackRecord(validated.value, {
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    channel,
+    environment: {
+      app: `${app.getVersion()}（${installKindLabels[installKind]}）`,
+      electron: process.versions.electron,
+      os: `${os.version()} ${os.release()} ${process.arch}`,
+      locale: app.getLocale(),
+    },
+  })
+  await appendFeedback(feedbackFile(), record).catch(() => undefined)
+  const markdown = formatFeedback(record)
+  if (channel === 'copy') {
+    clipboard.writeText(markdown)
+    return { ok: true, id: record.id, tags: record.tags, truncated: false }
+  }
+  const { url, truncated } = feedbackIssueUrl(record, REPOSITORY_URL)
+  if (truncated) clipboard.writeText(markdown)
+  try {
+    await shell.openExternal(url)
+  } catch {
+    clipboard.writeText(markdown)
+    return { ok: false, error: '无法打开浏览器，反馈内容已复制到剪贴板。' }
+  }
+  return { ok: true, id: record.id, tags: record.tags, truncated }
 }
 
 async function createWindow(): Promise<void> {
@@ -83,20 +198,24 @@ async function createWindow(): Promise<void> {
       send(IPC.documentUpdated, snapshot)
       if (mainWindow) mainWindow.setTitle(`${snapshot.dirty ? '*' : ''}${snapshot.fileName} — Inkdown`)
     },
-    (filePath) => void settings.addRecent(filePath).then(() => buildMenu()),
+    (filePath) => {
+      void settings.addRecent(filePath).then(() => buildMenu())
+      syncWorkspaceWith(filePath)
+    },
   )
   documentsReady = true
+  installKind = detectInstallKind({
+    isPackaged: app.isPackaged,
+    execPath: process.execPath,
+    env: process.env,
+    exists: existsSync,
+  })
   updates = new UpdateController({
     loadUpdater: async () => {
       const { autoUpdater, CancellationToken } = await import('electron-updater')
       return { updater: autoUpdater, createCancellationToken: () => new CancellationToken() }
     },
-    kind: detectInstallKind({
-      isPackaged: app.isPackaged,
-      execPath: process.execPath,
-      env: process.env,
-      exists: existsSync,
-    }),
+    kind: installKind,
     currentVersion: app.getVersion(),
     showMessageBox: showMessage,
     openExternal: (url) => shell.openExternal(url),
@@ -140,6 +259,9 @@ async function createWindow(): Promise<void> {
   }
   mainWindow.on('resize', persistBounds)
   mainWindow.on('move', persistBounds)
+  mainWindow.on('focus', () => {
+    if (workspace && Date.now() - workspaceScannedAt > 2_000) void refreshWorkspace()
+  })
   startExternalChangeMonitor()
 }
 
@@ -190,6 +312,18 @@ function registerIpc(): void {
     if (!trustedEvent(event.sender.id) || !isSafeExternalUrl(url)) return false
     return shell.openExternal(url).then(() => true, () => false)
   })
+  ipcMain.handle(IPC.workspaceGet, (event) => trustedEvent(event.sender.id) ? workspace ?? refreshWorkspace() : null)
+  ipcMain.handle(IPC.workspaceOpen, (event) => trustedEvent(event.sender.id) ? chooseWorkspace() : null)
+  ipcMain.handle(IPC.workspaceRefresh, (event) => trustedEvent(event.sender.id) ? refreshWorkspace() : null)
+  ipcMain.handle(IPC.workspaceClose, (event) => trustedEvent(event.sender.id) ? closeWorkspace() : null)
+  ipcMain.handle(IPC.feedbackSubmit, (event, input, channel) =>
+    trustedEvent(event.sender.id) ? submitFeedback(input, channel) : { ok: false, error: '请求无效' })
+  ipcMain.handle(IPC.feedbackOpenFolder, async (event) => {
+    if (!trustedEvent(event.sender.id)) return
+    const directory = path.dirname(feedbackFile())
+    await mkdir(directory, { recursive: true })
+    await shell.openPath(directory)
+  })
 }
 
 function buildMenu(): void {
@@ -211,6 +345,8 @@ function buildMenu(): void {
       submenu: [
         { label: '新建', accelerator: 'Ctrl+N', click: () => send(IPC.documentCommand, { action: 'new' }) },
         { label: '打开…', accelerator: 'Ctrl+O', click: () => send(IPC.documentCommand, { action: 'open' }) },
+        { label: '打开文件夹…', accelerator: 'Ctrl+Shift+O', click: () => void chooseWorkspace() },
+        { label: '关闭文件夹', enabled: Boolean(workspace), click: () => void closeWorkspace() },
         {
           label: '最近文件',
           submenu: settings.get().recentFiles.length
@@ -259,6 +395,7 @@ function buildMenu(): void {
         },
         { label: '访问发布页面', click: () => void shell.openExternal(RELEASES_URL) },
         { type: 'separator' },
+        { label: '意见反馈…', click: () => send(IPC.feedbackShow) },
         { label: '关于 Inkdown', click: () => void showAbout() },
       ],
     },

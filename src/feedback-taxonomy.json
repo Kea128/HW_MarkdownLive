@@ -1,0 +1,33 @@
+{
+  "types": [
+    { "id": "bug", "label": "问题报告" },
+    { "id": "feature", "label": "功能建议" },
+    { "id": "ux", "label": "体验与界面" },
+    { "id": "performance", "label": "性能" },
+    { "id": "other", "label": "其他" }
+  ],
+  "areas": [
+    { "id": "editor", "label": "编辑与排版" },
+    { "id": "source", "label": "源码模式" },
+    { "id": "formula", "label": "数学公式" },
+    { "id": "mermaid", "label": "Mermaid 图表" },
+    { "id": "table", "label": "表格" },
+    { "id": "files", "label": "文件与文件夹" },
+    { "id": "update", "label": "在线更新" },
+    { "id": "other", "label": "其他" }
+  ],
+  "tags": [
+    { "id": "crash", "label": "崩溃/无响应", "keywords": ["崩溃", "闪退", "无响应", "卡死", "白屏", "crash", "freeze", "hang"] },
+    { "id": "data-loss", "label": "内容丢失", "keywords": ["丢失", "没保存", "未保存", "内容没了", "lost"] },
+    { "id": "slow", "label": "卡顿/慢", "keywords": ["卡顿", "很慢", "太慢", "延迟", "lag", "slow"] },
+    { "id": "layout", "label": "排版/样式", "keywords": ["排版", "样式", "间距", "行距", "宽度", "太窄", "太宽", "重叠", "覆盖", "对齐", "layout", "overlap"] },
+    { "id": "formula", "label": "公式", "keywords": ["公式", "katex", "latex", "数学"] },
+    { "id": "mermaid", "label": "图表", "keywords": ["mermaid", "流程图", "时序图", "图表"] },
+    { "id": "table", "label": "表格", "keywords": ["表格", "单元格", "table"] },
+    { "id": "sidebar", "label": "侧栏/大纲", "keywords": ["侧栏", "大纲", "目录", "sidebar", "outline"] },
+    { "id": "files", "label": "文件/文件夹", "keywords": ["文件夹", "打开文件", "保存", "另存", "folder"] },
+    { "id": "update", "label": "更新", "keywords": ["更新", "升级", "update", "upgrade"] },
+    { "id": "shortcut", "label": "快捷键", "keywords": ["快捷键", "shortcut", "ctrl+"] },
+    { "id": "export", "label": "导出/打印", "keywords": ["导出", "打印", "pdf", "html", "export", "print"] }
+  ]
+}

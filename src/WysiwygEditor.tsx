@@ -29,10 +29,21 @@ export default function WysiwygEditor({ markdown, onChange }: Props) {
   const suppressedMarkdownRef = useRef<string | null>(
     restoreEquationMarkdown(editorMarkdownRef.current),
   )
+  // Milkdown re-serializes loaded Markdown (table padding, escapes, list markers); an untouched
+  // document must map back to the file content instead of being reported as an edit.
+  const pristineRef = useRef<{ source: string; canonical: string } | null>(null)
   const [failed, setFailed] = useState(false)
 
   onChangeRef.current = onChange
   latestMarkdownRef.current = markdown
+
+  const rememberPristine = (crepe: Crepe, source: string) => {
+    pristineRef.current = { source, canonical: restoreEquationMarkdown(crepe.getMarkdown()) }
+  }
+  const toSourceMarkdown = (editorMarkdown: string) => {
+    const restored = restoreEquationMarkdown(editorMarkdown)
+    return restored === pristineRef.current?.canonical ? pristineRef.current.source : restored
+  }
 
   useEffect(() => {
     const root = hostRef.current
@@ -98,7 +109,7 @@ export default function WysiwygEditor({ markdown, onChange }: Props) {
       if (!readyRef.current) return
       const currentMarkdown = crepe.getMarkdown()
       editorMarkdownRef.current = currentMarkdown
-      const sourceMarkdown = restoreEquationMarkdown(currentMarkdown)
+      const sourceMarkdown = toSourceMarkdown(currentMarkdown)
       if (sourceMarkdown === latestMarkdownRef.current) return
       latestMarkdownRef.current = sourceMarkdown
       suppressedMarkdownRef.current = null
@@ -107,7 +118,7 @@ export default function WysiwygEditor({ markdown, onChange }: Props) {
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, nextMarkdown) => {
         editorMarkdownRef.current = nextMarkdown
-        const sourceMarkdown = restoreEquationMarkdown(nextMarkdown)
+        const sourceMarkdown = toSourceMarkdown(nextMarkdown)
         latestMarkdownRef.current = sourceMarkdown
         decorateEquations()
         if (suppressedMarkdownRef.current === sourceMarkdown) {
@@ -135,6 +146,7 @@ export default function WysiwygEditor({ markdown, onChange }: Props) {
         editorMarkdownRef.current = latest
         crepe.editor.action(replaceAll(latest, true))
       }
+      rememberPristine(crepe, latestMarkdownRef.current)
     }).catch(() => {
       if (!disposed) setFailed(true)
     })
@@ -159,6 +171,7 @@ export default function WysiwygEditor({ markdown, onChange }: Props) {
     suppressedMarkdownRef.current = restoreEquationMarkdown(nextMarkdown)
     editorMarkdownRef.current = nextMarkdown
     crepe.editor.action(replaceAll(nextMarkdown, true))
+    rememberPristine(crepe, markdown)
   }, [markdown])
 
   const openExternalLink = (event: MouseEvent<HTMLDivElement>) => {

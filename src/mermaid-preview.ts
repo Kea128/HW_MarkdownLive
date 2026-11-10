@@ -4,10 +4,6 @@ type Mermaid = (typeof import('mermaid'))['default']
 type ApplyPreview = (value: string | null) => void
 
 const CACHE_LIMIT = 40
-const VARIANTS: ReadonlyArray<{ name: string; theme: MermaidConfig['theme'] }> = [
-  { name: 'light', theme: 'default' },
-  { name: 'dark', theme: 'dark' },
-]
 
 let mermaidModule: Promise<Mermaid> | undefined
 let queue: Promise<unknown> = Promise.resolve()
@@ -36,6 +32,14 @@ function loadMermaid(): Promise<Mermaid> {
   return mermaidModule
 }
 
+// Mermaid 12 gives some diagram types the colourful redux palette by default. Their dark counterpart is
+// redux-dark-color, while every other diagram type pairs the `default` theme with `dark`.
+function darkThemeConfig(mermaid: Mermaid): MermaidConfig {
+  const sections = Object.entries(mermaid.mermaidAPI.defaultConfig).flatMap(([section, value]) =>
+    (value as { theme?: unknown } | null)?.theme === 'redux-color' ? [[section, { theme: 'redux-dark-color' }]] : [])
+  return { theme: 'dark', ...Object.fromEntries(sections) } as MermaidConfig
+}
+
 async function renderDiagram(source: string): Promise<string> {
   const mermaid = await loadMermaid()
   try {
@@ -44,14 +48,15 @@ async function renderDiagram(source: string): Promise<string> {
     return errorPreview(error)
   }
   const fontFamily = getComputedStyle(document.documentElement).getPropertyValue('--sans').trim() || 'sans-serif'
+  const themes: Array<[string, MermaidConfig]> = [['light', {}], ['dark', darkThemeConfig(mermaid)]]
   const variants: string[] = []
-  for (const { name, theme } of VARIANTS) {
+  for (const [name, themeConfig] of themes) {
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: 'strict',
       suppressErrorRendering: true,
       fontFamily,
-      theme,
+      ...themeConfig,
     })
     try {
       const { svg } = await mermaid.render(`inkdown-mermaid-${++sequence}`, source)

@@ -14,6 +14,14 @@ export const IPC = {
   themeSet: 'theme:set',
   externalOpen: 'external:open',
   updateState: 'update:state',
+  workspaceGet: 'workspace:get',
+  workspaceOpen: 'workspace:open',
+  workspaceRefresh: 'workspace:refresh',
+  workspaceClose: 'workspace:close',
+  workspaceUpdated: 'workspace:updated',
+  feedbackSubmit: 'feedback:submit',
+  feedbackOpenFolder: 'feedback:open-folder',
+  feedbackShow: 'feedback:show',
 } as const
 
 export type ViewMode = 'visual' | 'source' | 'toggle'
@@ -25,6 +33,35 @@ export type UpdateState =
   | { phase: 'idle' | 'checking' }
   | { phase: 'downloading'; version: string; percent: number }
   | { phase: 'downloaded'; version: string }
+
+export interface WorkspaceEntry {
+  name: string
+  path: string
+  children?: WorkspaceEntry[]
+}
+
+export interface WorkspaceSnapshot {
+  root: string
+  name: string
+  entries: WorkspaceEntry[]
+  fileCount: number
+  truncated: boolean
+}
+
+export type FeedbackChannel = 'github' | 'copy'
+
+export interface FeedbackInput {
+  type: string
+  area: string
+  title: string
+  details: string
+  contact: string
+  includeEnvironment: boolean
+}
+
+export type FeedbackResult =
+  | { ok: true; id: string; tags: string[]; truncated: boolean }
+  | { ok: false; error: string }
 
 export interface DocumentSnapshot {
   content: string
@@ -64,5 +101,17 @@ export interface InkdownApi {
   }
   updates: {
     onState(listener: (state: UpdateState) => void): () => void
+  }
+  workspace: {
+    get(): Promise<WorkspaceSnapshot | null>
+    open(): Promise<WorkspaceSnapshot | null>
+    refresh(): Promise<WorkspaceSnapshot | null>
+    close(): Promise<null>
+    onUpdated(listener: (snapshot: WorkspaceSnapshot | null) => void): () => void
+  }
+  feedback: {
+    submit(input: FeedbackInput, channel: FeedbackChannel): Promise<FeedbackResult>
+    openFolder(): Promise<void>
+    onShow(listener: () => void): () => void
   }
 }

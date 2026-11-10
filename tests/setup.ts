@@ -45,5 +45,17 @@ Object.defineProperty(window, 'inkdown', {
     },
     external: { open: vi.fn(async () => true) },
     updates: { onState: vi.fn(() => () => undefined) },
+    workspace: {
+      get: vi.fn(async () => null),
+      open: vi.fn(async () => null),
+      refresh: vi.fn(async () => null),
+      close: vi.fn(async () => null),
+      onUpdated: vi.fn(() => () => undefined),
+    },
+    feedback: {
+      submit: vi.fn(async () => ({ ok: true, id: '00000000-feedback', tags: [], truncated: false })),
+      openFolder: vi.fn(async () => undefined),
+      onShow: vi.fn(() => () => undefined),
+    },
   },
 })

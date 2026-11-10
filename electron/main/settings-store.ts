@@ -1,10 +1,12 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import type { Bounds } from './window-state'
 import { isDocumentPath } from './validators'
+import { isWorkspaceRoot } from './workspace'
 
 export interface Settings {
   bounds?: Bounds
   recentFiles: string[]
+  workspaceFolder?: string
 }
 
 export class SettingsStore {
@@ -20,6 +22,7 @@ export class SettingsStore {
         recentFiles: Array.isArray(parsed.recentFiles)
           ? parsed.recentFiles.filter(isDocumentPath).slice(0, 10)
           : [],
+        workspaceFolder: isWorkspaceRoot(parsed.workspaceFolder) ? parsed.workspaceFolder : undefined,
       }
     } catch {
       this.value = { recentFiles: [] }

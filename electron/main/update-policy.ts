@@ -1,6 +1,7 @@
 import path from 'node:path'
 
-export const RELEASES_URL = 'https://github.com/Kea128/HW_MarkdownLive/releases'
+export const REPOSITORY_URL = 'https://github.com/Kea128/HW_MarkdownLive'
+export const RELEASES_URL = `${REPOSITORY_URL}/releases`
 export const UPDATE_TIMEOUT_CODE = 'ERR_UPDATE_TIMEOUT'
 
 export type InstallKind = 'installed' | 'portable' | 'archive' | 'development'

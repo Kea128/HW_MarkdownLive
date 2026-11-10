@@ -1,5 +1,5 @@
 import { _electron as electron } from '@playwright/test'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -59,9 +59,22 @@ try {
     throw new Error(`打包版 Mermaid 渲染验证失败: ${JSON.stringify(result)}`)
   }
   if (policyViolations.length) throw new Error(`打包版违反内容安全策略: ${policyViolations.join(' | ')}`)
-  const helpMenu = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items
-    .find((item) => item.label.includes('帮助'))?.submenu?.items.map((item) => item.label) ?? [])
-  if (!helpMenu.includes('检查更新…')) throw new Error(`打包版缺少检查更新菜单: ${JSON.stringify(helpMenu)}`)
+  const menuLabels = (name) => app.evaluate(({ Menu }, menu) => Menu.getApplicationMenu()?.items
+    .find((item) => item.label.includes(menu))?.submenu?.items.map((item) => item.label) ?? [], name)
+  const helpMenu = await menuLabels('帮助')
+  const fileMenu = await menuLabels('文件')
+  if (!helpMenu.includes('检查更新…') || !helpMenu.includes('意见反馈…') || !fileMenu.includes('打开文件夹…')) {
+    throw new Error(`打包版菜单不完整: ${JSON.stringify({ helpMenu, fileMenu })}`)
+  }
+  const folder = path.join(profile, '工作区')
+  await mkdir(path.join(folder, '子目录'), { recursive: true })
+  await writeFile(path.join(folder, '子目录', '笔记.md'), '# 笔记', 'utf8')
+  await app.evaluate(({ dialog }, target) => {
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [target] })
+  }, folder)
+  await page.getByRole('button', { name: '打开文件夹', exact: true }).click()
+  await page.getByRole('navigation', { name: '文件夹中的 Markdown 文件' })
+    .getByRole('button', { name: '笔记.md' }).waitFor({ state: 'visible', timeout: 15_000 })
   const updater = await app.evaluate(() => {
     const loadedAtStartup = Object.keys(process.mainModule.constructor._cache)
       .some((file) => file.includes('electron-updater'))
@@ -76,7 +89,7 @@ try {
     throw new Error(`打包版更新模块异常: ${JSON.stringify(updater)}`)
   }
   console.log(JSON.stringify({
-    executablePath, ...result, mermaidText: undefined, updateFeed: `github:${owner}/${repo}`, helpMenu, updater,
+    executablePath, ...result, mermaidText: undefined, updateFeed: `github:${owner}/${repo}`, helpMenu, workspace: true, updater,
   }))
 } finally {
   await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)

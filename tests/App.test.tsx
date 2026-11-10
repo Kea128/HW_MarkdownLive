@@ -1,8 +1,8 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import type { DocumentCommand, UpdateState } from '../src/contracts'
+import type { DocumentCommand, UpdateState, WorkspaceSnapshot } from '../src/contracts'
 
 vi.mock('../src/WysiwygEditor', () => ({
   default: ({ markdown, onChange }: { markdown: string; onChange: (value: string) => void }) => (
@@ -216,5 +216,102 @@ describe('Inkdown 桌面编辑器', () => {
     const file = new File(['# drop'], '文档.md')
     fireEvent.drop(document.querySelector('.app')!, { dataTransfer: { files: [file] } })
     await waitFor(() => expect(window.inkdown.document.openPath).toHaveBeenCalledWith('C:\\测试\\文档.md'))
+  })
+
+  it('打开文件夹后在侧栏列出 Markdown 文件并点击打开', async () => {
+    const workspace: WorkspaceSnapshot = {
+      root: 'C:\\中文',
+      name: '中文',
+      fileCount: 3,
+      truncated: false,
+      entries: [
+        { name: '指南', path: 'C:\\中文\\指南', children: [{ name: '安装.md', path: 'C:\\中文\\指南\\安装.md' }] },
+        { name: '初始.md', path: 'C:\\中文\\初始.md' },
+        { name: '说明.md', path: 'C:\\中文\\说明.md' },
+      ],
+    }
+    let workspaceListener: ((snapshot: WorkspaceSnapshot | null) => void) | undefined
+    vi.mocked(window.inkdown.workspace.onUpdated).mockImplementation((listener) => {
+      workspaceListener = listener
+      return () => undefined
+    })
+    vi.mocked(window.inkdown.workspace.open).mockResolvedValue(workspace)
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    await userEvent.click(screen.getByRole('button', { name: '打开文件夹' }))
+
+    const files = await screen.findByRole('navigation', { name: '文件夹中的 Markdown 文件' })
+    expect(screen.getByRole('tab', { name: '文件' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(files).getByRole('button', { name: '初始.md' })).toHaveAttribute('aria-current', 'page')
+    await userEvent.click(within(files).getByRole('button', { name: '说明.md' }))
+    expect(window.inkdown.document.openPath).toHaveBeenCalledWith('C:\\中文\\说明.md')
+
+    const folder = within(files).getByRole('button', { name: '指南' })
+    expect(folder).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(folder)
+    expect(folder).toHaveAttribute('aria-expanded', 'false')
+    expect(within(files).queryByRole('button', { name: '安装.md' })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('tab', { name: '大纲' }))
+    expect(screen.getByRole('navigation', { name: '文档大纲' })).toHaveTextContent('初始文稿')
+    await userEvent.click(screen.getByRole('tab', { name: '文件' }))
+    await userEvent.click(screen.getByRole('button', { name: '刷新文件列表' }))
+    expect(window.inkdown.workspace.refresh).toHaveBeenCalledOnce()
+    act(() => workspaceListener?.(null))
+    expect(screen.getByText(/打开文件夹后，这里会列出/)).toBeInTheDocument()
+  })
+
+  it('侧栏分隔条支持键盘与双击调整宽度并记住', async () => {
+    localStorage.setItem('inkdown-sidebar-width', '300')
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    await userEvent.click(screen.getByRole('button', { name: '展开侧栏' }))
+    const workspace = document.querySelector<HTMLElement>('.workspace')!
+    const resizer = screen.getByRole('separator', { name: '调整侧栏宽度' })
+    expect(workspace.style.getPropertyValue('--sidebar-width')).toBe('300px')
+    fireEvent.keyDown(resizer, { key: 'ArrowRight' })
+    expect(workspace.style.getPropertyValue('--sidebar-width')).toBe('316px')
+    expect(localStorage.getItem('inkdown-sidebar-width')).toBe('316')
+    fireEvent.keyDown(resizer, { key: 'Home' })
+    expect(resizer).toHaveAttribute('aria-valuenow', '180')
+    fireEvent.doubleClick(resizer)
+    expect(workspace.style.getPropertyValue('--sidebar-width')).toBe('260px')
+    expect(localStorage.getItem('inkdown-sidebar-width')).toBe('260')
+  })
+
+  it('意见反馈：校验、提交到 GitHub 并显示结果', async () => {
+    let showListener: (() => void) | undefined
+    vi.mocked(window.inkdown.feedback.onShow).mockImplementation((listener) => {
+      showListener = listener
+      return () => undefined
+    })
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    act(() => showListener?.())
+    const dialog = screen.getByRole('dialog', { name: '意见反馈' })
+    await userEvent.click(within(dialog).getByRole('button', { name: /提交到 GitHub/ }))
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('标题需为')
+    expect(window.inkdown.feedback.submit).not.toHaveBeenCalled()
+
+    await userEvent.selectOptions(within(dialog).getByLabelText('涉及功能'), 'table')
+    await userEvent.type(within(dialog).getByLabelText(/^标题/), '表格长代码覆盖文字')
+    await userEvent.type(within(dialog).getByLabelText(/^详细描述/), '单元格里的行内代码重叠到右侧')
+    expect(within(dialog).getByText('排版/样式')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByLabelText(/附带应用版本/))
+    await userEvent.click(within(dialog).getByRole('button', { name: /提交到 GitHub/ }))
+    await waitFor(() => expect(window.inkdown.feedback.submit).toHaveBeenCalledWith({
+      type: 'bug', area: 'table', title: '表格长代码覆盖文字', details: '单元格里的行内代码重叠到右侧',
+      contact: '', includeEnvironment: false,
+    }, 'github'))
+    expect(await within(dialog).findByText('感谢你的反馈！')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: '打开反馈记录' }))
+    expect(window.inkdown.feedback.openFolder).toHaveBeenCalledOnce()
+    await userEvent.click(within(dialog).getByRole('button', { name: '完成' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: '意见反馈' }))
+    expect(screen.getByRole('dialog', { name: '意见反馈' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

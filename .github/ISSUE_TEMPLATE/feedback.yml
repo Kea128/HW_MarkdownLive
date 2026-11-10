@@ -1,0 +1,54 @@
+name: 意见反馈
+description: 问题报告、功能建议或使用体验反馈。Inkdown 应用内“帮助 → 意见反馈”会自动预填本表单。
+title: "[反馈] "
+labels: ["feedback"]
+body:
+  - type: dropdown
+    id: type
+    attributes:
+      label: 反馈类型
+      options:
+        - 问题报告
+        - 功能建议
+        - 体验与界面
+        - 性能
+        - 其他
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及功能
+      options:
+        - 编辑与排版
+        - 源码模式
+        - 数学公式
+        - Mermaid 图表
+        - 表格
+        - 文件与文件夹
+        - 在线更新
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: 详细描述
+      description: 问题请写清操作步骤、期望结果和实际结果，最好附上能复现问题的 Markdown 片段；建议请写明使用场景。
+    validations:
+      required: true
+  - type: input
+    id: tags
+    attributes:
+      label: 自动标签
+      description: 应用根据内容自动识别的标签，可按需修改。
+  - type: input
+    id: environment
+    attributes:
+      label: 运行环境
+      placeholder: Inkdown 2.8.1（安装版） · Electron 43 · Windows 11
+  - type: input
+    id: feedback-id
+    attributes:
+      label: 反馈编号
+      description: 应用内生成的编号，用于和本机保存的反馈记录对应。

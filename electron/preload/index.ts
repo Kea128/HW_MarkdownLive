@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import {
   IPC, type DocumentCommand, type DocumentSnapshot, type InkdownApi, type Theme, type UpdateState,
-  type ViewMode,
+  type ViewMode, type WorkspaceSnapshot,
 } from '../../src/contracts'
 
 function subscription<T>(channel: string, listener: (value: T) => void): () => void {
@@ -34,6 +34,18 @@ const api: InkdownApi = {
   },
   updates: {
     onState: (listener) => subscription<UpdateState>(IPC.updateState, listener),
+  },
+  workspace: {
+    get: () => ipcRenderer.invoke(IPC.workspaceGet),
+    open: () => ipcRenderer.invoke(IPC.workspaceOpen),
+    refresh: () => ipcRenderer.invoke(IPC.workspaceRefresh),
+    close: () => ipcRenderer.invoke(IPC.workspaceClose),
+    onUpdated: (listener) => subscription<WorkspaceSnapshot | null>(IPC.workspaceUpdated, listener),
+  },
+  feedback: {
+    submit: (input, channel) => ipcRenderer.invoke(IPC.feedbackSubmit, input, channel),
+    openFolder: () => ipcRenderer.invoke(IPC.feedbackOpenFolder),
+    onShow: (listener) => subscription<void>(IPC.feedbackShow, () => listener()),
   },
 }
 

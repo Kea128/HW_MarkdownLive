@@ -3,13 +3,17 @@ import {
   type CSSProperties, type DragEvent, type KeyboardEvent,
 } from 'react'
 import {
-  Bold, Braces, CheckSquare, Code2, Eye, FilePlus2, FolderOpen,
-  Image, Italic, Link, List, ListOrdered, Minus, Moon, PanelLeftClose, PanelLeftOpen,
+  Bold, Braces, CheckSquare, Code2, Eye, FilePlus2, FolderOpen, FolderTree,
+  Image, Italic, Link, List, ListOrdered, MessageSquarePlus, Minus, Moon, PanelLeftClose, PanelLeftOpen,
   Quote, Save, SaveAll, Sigma, Strikethrough, Sun, Table2, Text, Workflow,
 } from 'lucide-react'
 import { createEquationLabel, getEquationDefinitions } from './equations'
+import { FeedbackDialog } from './FeedbackDialog'
 import { useDesktopDocument } from './hooks/useDesktopDocument'
 import { useSourceEditorActions } from './hooks/useSourceEditorActions'
+import { useWorkspace } from './hooks/useWorkspace'
+import { Sidebar, type OutlineItem, type SidebarView } from './Sidebar'
+import { readSidebarWidth, SIDEBAR_WIDTH } from './sidebar-width'
 import { getDocumentStats, type EditorMode } from './utils'
 import type { Theme, UpdateState } from './contracts'
 import './App.css'
@@ -48,6 +52,13 @@ function App() {
   const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' })
   const updateMessage = describeUpdate(updateState)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarView, setSidebarView] = useState<SidebarView>('outline')
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const { workspace, openFolder, refreshFolder, closeFolder } = useWorkspace(() => {
+    setSidebarOpen(true)
+    setSidebarView('files')
+  })
   const [currentLine, setCurrentLine] = useState(1)
   const [lineSpacing, setLineSpacing] = useState<LineSpacing>(() => {
     const saved = localStorage.getItem('inkdown-line-spacing')
@@ -67,7 +78,7 @@ function App() {
   )
   const outline = useMemo(() => {
     let offset = 0
-    return lines.flatMap((line, index) => {
+    return lines.flatMap((line, index): OutlineItem[] => {
       const match = /^(#{1,6})\s+(.+?)\s*#*$/.exec(line)
       const item = match ? [{ level: match[1].length, text: match[2], line: index + 1, offset }] : []
       offset += line.length + 1
@@ -118,6 +129,25 @@ function App() {
   }, [])
 
   useEffect(() => window.inkdown.updates.onState(setUpdateState), [])
+  useEffect(() => window.inkdown.feedback.onShow(() => setFeedbackOpen(true)), [])
+
+  const changeSidebarWidth = (width: number) => {
+    setSidebarWidth(width)
+    localStorage.setItem(SIDEBAR_WIDTH.storageKey, String(width))
+  }
+
+  const selectOutline = (item: OutlineItem, index: number) => {
+    const editor = editorRef.current
+    if (editor) {
+      editor.focus()
+      editor.setSelectionRange(item.offset, item.offset)
+      editor.scrollTop = Math.max(0, (item.line - 3) * SOURCE_LINE_HEIGHT)
+      setCurrentLine(item.line)
+      return
+    }
+    const headings = document.querySelectorAll<HTMLElement>('.visual-editor .ProseMirror :is(h1, h2, h3, h4, h5, h6)')
+    headings[index]?.scrollIntoView({ block: 'start' })
+  }
 
   const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     const modifier = event.ctrlKey || event.metaKey
@@ -175,6 +205,7 @@ function App() {
           <span className="action-divider" />
           <button type="button" onClick={() => void newDocument()} title="新建 (Ctrl+N)" aria-label="新建文档"><FilePlus2 /></button>
           <button type="button" onClick={() => void openDocument()} title="打开 (Ctrl+O)" aria-label="打开文档"><FolderOpen /></button>
+          <button type="button" onClick={() => void openFolder()} title="打开文件夹 (Ctrl+Shift+O)" aria-label="打开文件夹"><FolderTree /></button>
           <button type="button" onClick={() => void saveDocument()} title="保存 (Ctrl+S)" aria-label="保存文档"><Save /></button>
           <button type="button" onClick={() => void saveAsDocument()} title="另存为 (Ctrl+Shift+S)" aria-label="另存为"><SaveAll /></button>
         </nav>
@@ -214,6 +245,9 @@ function App() {
               void window.inkdown.view.setTheme(next)
             }} aria-label="切换明暗主题" title={`当前主题：${theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色'}`}>
             {document.documentElement.dataset.theme === 'dark' ? <Sun /> : <Moon />}
+          </button>
+          <button type="button" onClick={() => setFeedbackOpen(true)} title="意见反馈" aria-label="意见反馈">
+            <MessageSquarePlus />
           </button>
         </div>
       </header>
@@ -280,30 +314,13 @@ function App() {
         </div>
       )}
 
-      <main className={`workspace ${sidebarOpen ? 'has-sidebar' : ''}`}>
+      <main className={`workspace ${sidebarOpen ? 'has-sidebar' : ''}`}
+        style={{ '--sidebar-width': `${sidebarWidth}px` } as CSSProperties}>
         {sidebarOpen && (
-          <aside className="sidebar" aria-label="文档侧栏">
-            <div className="sidebar-heading">大纲</div>
-            <nav className="outline" aria-label="文档大纲">
-              {outline.length ? outline.map((item, outlineIndex) => (
-                <button key={`${item.line}-${item.text}`} type="button" style={{ paddingLeft: `${12 + (item.level - 1) * 12}px` }}
-                  onClick={() => {
-                    const editor = editorRef.current
-                    if (editor) {
-                      editor.focus()
-                      editor.setSelectionRange(item.offset, item.offset)
-                      editor.scrollTop = Math.max(0, (item.line - 3) * SOURCE_LINE_HEIGHT)
-                      setCurrentLine(item.line)
-                      return
-                    }
-                    const headings = document.querySelectorAll<HTMLElement>('.visual-editor .ProseMirror h1, .visual-editor .ProseMirror h2, .visual-editor .ProseMirror h3, .visual-editor .ProseMirror h4, .visual-editor .ProseMirror h5, .visual-editor .ProseMirror h6')
-                    headings[outlineIndex]?.scrollIntoView({ block: 'start' })
-                  }}>
-                  <span>{item.text}</span><small>{item.line}</small>
-                </button>
-              )) : <p className="outline-empty">添加标题后，这里会显示文档结构。</p>}
-            </nav>
-          </aside>
+          <Sidebar view={sidebarView} onViewChange={setSidebarView} width={sidebarWidth} onWidthChange={changeSidebarWidth}
+            outline={outline} onOutlineSelect={selectOutline} workspace={workspace} activePath={activeDocument.filePath}
+            onOpenFolder={() => void openFolder()} onRefreshFolder={() => void refreshFolder()}
+            onCloseFolder={() => void closeFolder()} onOpenFile={(filePath) => void openPath(filePath)} />
         )}
         {mode === 'source' ? (
           <section className="editor-pane" aria-label="Markdown 编辑器">
@@ -333,6 +350,7 @@ function App() {
       </main>
 
       {dragging && <div className="drop-overlay">释放以打开文档</div>}
+      {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
       <footer className="statusbar" aria-live="polite">
         <div className="status-messages">
           <span>{status}</span>
