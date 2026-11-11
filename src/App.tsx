@@ -20,6 +20,7 @@ import './App.css'
 
 const WysiwygEditor = lazy(() => import('./WysiwygEditor'))
 const SOURCE_LINE_HEIGHT = 28
+const DOCUMENT_FILE = /\.(?:md|markdown|txt)$/i
 const MERMAID_SAMPLE = 'flowchart LR\n  A[开始] --> B{是否完成？}\n  B -- 是 --> C[发布]\n  B -- 否 --> D[继续修改]'
 
 const modes: Array<{ mode: EditorMode; label: string; icon: typeof Eye }> = [
@@ -169,10 +170,10 @@ function App() {
   }
 
   const drop = (event: DragEvent) => {
-    event.preventDefault()
     setDragging(false)
     const file = event.dataTransfer.files[0]
-    if (!file) return
+    if (!file || !DOCUMENT_FILE.test(file.name)) return
+    event.preventDefault()
     const filePath = window.inkdown.document.pathForFile(file)
     if (filePath) void openPath(filePath)
   }
@@ -192,7 +193,11 @@ function App() {
     <div
       className={`app mode-${mode} ${dragging ? 'is-dragging' : ''}`}
       data-line-spacing={lineSpacing}
-      onDragOver={(event) => { event.preventDefault(); setDragging(true) }}
+      onDragOver={(event) => {
+        if (!Array.from(event.dataTransfer.items).some((item) => item.kind === 'file' && !item.type.startsWith('image/'))) return
+        event.preventDefault()
+        setDragging(true)
+      }}
       onDragLeave={() => setDragging(false)}
       onDrop={drop}
     >
@@ -343,7 +348,8 @@ function App() {
         ) : (
           <section className="visual-pane" aria-label="Markdown 所见即所得区域">
             <Suspense fallback={<div className="visual-editor-loading" aria-label="正在准备所见即所得编辑器" />}>
-              <WysiwygEditor markdown={activeDocument.content} onChange={updateContent} />
+              <WysiwygEditor markdown={activeDocument.content} documentPath={activeDocument.filePath}
+                onChange={updateContent} />
             </Suspense>
           </section>
         )}

@@ -24,6 +24,7 @@ import { createFeedbackRecord, feedbackIssueUrl, formatFeedback, validateFeedbac
 import { DocumentController } from './document-controller'
 import { appendFeedback } from './feedback-store'
 import { FileService } from './file-service'
+import { registerImageScheme, serveLocalImages } from './image-protocol'
 import { SettingsStore } from './settings-store'
 import { UpdateController } from './update-controller'
 import { detectInstallKind, RELEASES_URL, REPOSITORY_URL, type InstallKind } from './update-policy'
@@ -170,6 +171,7 @@ async function submitFeedback(input: unknown, channel: unknown): Promise<Feedbac
 }
 
 async function createWindow(): Promise<void> {
+  serveLocalImages()
   settings = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'))
   await settings.load()
   const displays = screen.getAllDisplays().map(({ workArea }) => workArea)
@@ -276,7 +278,7 @@ function secureWindow(window: BrowserWindow): void {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; font-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
+          "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http: inkdown-image:; font-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:*; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
         ],
       },
     })
@@ -447,6 +449,7 @@ function startExternalChangeMonitor(): void {
   externalChangeTimer.unref()
 }
 
+registerImageScheme()
 const lock = app.requestSingleInstanceLock()
 if (!lock) {
   app.quit()

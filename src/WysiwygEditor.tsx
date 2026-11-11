@@ -3,7 +3,9 @@ import { languages } from '@codemirror/language-data'
 import { Crepe } from '@milkdown/crepe'
 import { replaceAll } from '@milkdown/kit/utils'
 import { prepareEquationMarkdown, restoreEquationMarkdown } from './equations'
+import { installImagePlugins } from './editor-images'
 import { decorateEquationBlocks, hasEquationMutation } from './equation-decoration'
+import { resolveImageSource } from './image-source'
 import { normalizeMathDelimiters } from './markdown'
 import { mermaidLanguage } from './mermaid-language'
 import { isMermaidLanguage, renderMermaidPreview } from './mermaid-preview'
@@ -13,17 +15,19 @@ import 'katex/dist/katex.min.css'
 
 interface Props {
   markdown: string
+  documentPath?: string | null
   onChange: (markdown: string) => void
 }
 
 const toEditorMarkdown = (markdown: string) =>
   prepareEquationMarkdown(normalizeMathDelimiters(markdown))
 
-export default function WysiwygEditor({ markdown, onChange }: Props) {
+export default function WysiwygEditor({ markdown, documentPath = null, onChange }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<Crepe | null>(null)
   const readyRef = useRef(false)
   const onChangeRef = useRef(onChange)
+  const documentPathRef = useRef(documentPath)
   const latestMarkdownRef = useRef(markdown)
   const editorMarkdownRef = useRef(toEditorMarkdown(markdown))
   const suppressedMarkdownRef = useRef<string | null>(
@@ -35,6 +39,7 @@ export default function WysiwygEditor({ markdown, onChange }: Props) {
   const [failed, setFailed] = useState(false)
 
   onChangeRef.current = onChange
+  documentPathRef.current = documentPath
   latestMarkdownRef.current = markdown
 
   const rememberPristine = (crepe: Crepe, source: string) => {
@@ -73,6 +78,8 @@ export default function WysiwygEditor({ markdown, onChange }: Props) {
         [Crepe.Feature.Table]: true,
         [Crepe.Feature.CodeMirror]: true,
         [Crepe.Feature.Toolbar]: true,
+        // The image block stores its resize ratio in the alt text, overwriting Typora's alt on every save.
+        [Crepe.Feature.ImageBlock]: false,
       },
       featureConfigs: {
         [Crepe.Feature.Placeholder]: {
@@ -103,6 +110,11 @@ export default function WysiwygEditor({ markdown, onChange }: Props) {
           },
         },
       },
+    })
+    installImagePlugins(crepe.editor, {
+      resolve: (source) => resolveImageSource(source, documentPathRef.current),
+      documentPath: () => documentPathRef.current,
+      pathForFile: (file) => window.inkdown.document.pathForFile(file),
     })
     crepeRef.current = crepe
     const publishCurrentMarkdown = () => {

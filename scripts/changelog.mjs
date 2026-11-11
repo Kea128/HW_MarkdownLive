@@ -7,6 +7,7 @@ export function changelogSection(changelog, version) {
 }
 
 // Inkdown 2.7.0 cuts notes longer than 600 characters mid-line, so stay below that on whole lines.
+// The app parses notes as HTML (stripping tags, decoding entities), so literal <, > and & must be escaped.
 export function updateNotes(markdown, maxLength = 560) {
   const lines = markdown.split(/\r?\n/)
     .map((line) => line
@@ -16,6 +17,9 @@ export function updateNotes(markdown, maxLength = 560) {
       .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
       .replace(/\*\*([^*]+)\*\*/g, '$1')
       .replace(/`([^`]+)`/g, '$1')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
       .trim())
     .filter(Boolean)
   const kept = []

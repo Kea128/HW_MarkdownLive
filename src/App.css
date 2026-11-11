@@ -934,6 +934,33 @@ button svg {
   max-width: 100%;
 }
 
+.visual-editor .milkdown .ProseMirror :is(.milkdown-image-inline, .html-image) {
+  max-width: 100%;
+}
+
+.visual-editor .milkdown .ProseMirror :is(.milkdown-image-inline, .html-image) img {
+  height: auto;
+  border-radius: 4px;
+  vertical-align: bottom;
+}
+
+.visual-editor .milkdown .ProseMirror .html-image[data-align] {
+  display: block;
+}
+
+.visual-editor .milkdown .ProseMirror .html-image[data-align="center"] {
+  text-align: center;
+}
+
+.visual-editor .milkdown .ProseMirror .html-image[data-align="right"] {
+  text-align: right;
+}
+
+.visual-editor .milkdown .ProseMirror :is(.milkdown-image-inline.selected, .html-image.ProseMirror-selectednode) img {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .visual-editor-loading {
   width: min(70%, 560px);
   height: 22px;

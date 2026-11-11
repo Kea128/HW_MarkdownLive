@@ -218,6 +218,14 @@ describe('Inkdown 桌面编辑器', () => {
     await waitFor(() => expect(window.inkdown.document.openPath).toHaveBeenCalledWith('C:\\测试\\文档.md'))
   })
 
+  it('拖入图片交给编辑器插入，不当作文档打开', async () => {
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    const image = new File(['png'], '截图.png', { type: 'image/png' })
+    fireEvent.drop(document.querySelector('.app')!, { dataTransfer: { files: [image] } })
+    expect(window.inkdown.document.openPath).not.toHaveBeenCalled()
+  })
+
   it('打开文件夹后在侧栏列出 Markdown 文件并点击打开', async () => {
     const workspace: WorkspaceSnapshot = {
       root: 'C:\\中文',

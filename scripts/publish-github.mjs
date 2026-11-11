@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { changelogSection } from './changelog.mjs'
+import { resolveGitHubToken } from './github-token.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const { version, build } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
@@ -50,23 +51,7 @@ function releaseNotes() {
 `
 }
 
-function resolveToken() {
-  const fromEnv = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
-  if (fromEnv) return fromEnv
-  try {
-    const output = execFileSync('git', ['credential', 'fill'], {
-      input: 'protocol=https\nhost=github.com\n\n',
-      encoding: 'utf8',
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
-      stdio: ['pipe', 'pipe', 'ignore'],
-    })
-    return /^password=(.+?)\r?$/m.exec(output)?.[1]
-  } catch {
-    return undefined
-  }
-}
-
-const token = resolveToken()
+const token = resolveGitHubToken()
 if (!token) throw new Error('缺少 GitHub 凭据：请设置 GH_TOKEN，或先通过 git 登录 github.com')
 
 async function github(method, url, { body, headers = {}, allowMissing = false } = {}) {

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
+const SAMPLE_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
 const executablePath = path.resolve(process.argv[2] ?? path.join(
   root,
   'release-build',
@@ -38,7 +39,9 @@ try {
   await page.getByRole('button', { name: '源码模式' }).click()
   const editor = page.getByRole('textbox', { name: 'Markdown 源码' })
   await editor.waitFor({ state: 'visible' })
-  await editor.fill('# 打包版验证\n\n行内 $E=mc^2$\n\n$$\n\\frac{a_1}{b^2}\n$$\n\n```mermaid\nflowchart LR\n  A[开始] --> B[完成]\n```')
+  const localImage = path.join(profile, '本地 图片.png')
+  await writeFile(localImage, Buffer.from(SAMPLE_PNG, 'base64'))
+  await editor.fill(`# 打包版验证\n\n行内 $E=mc^2$\n\n$$\n\\frac{a_1}{b^2}\n$$\n\n\`\`\`mermaid\nflowchart LR\n  A[开始] --> B[完成]\n\`\`\`\n\n![本地图片](<${localImage}>)`)
   await page.getByRole('button', { name: '所见即所得模式' }).click()
   await page.locator('.katex').first().waitFor({ state: 'visible' })
   await page.locator('.mermaid-diagram .mermaid-light svg').waitFor({ state: 'visible', timeout: 60_000 })
@@ -51,6 +54,13 @@ try {
     css: getComputedStyle(document.querySelector('.katex')).fontFamily,
     mermaidSvgs: document.querySelectorAll('.mermaid-diagram svg').length,
     mermaidText: document.querySelector('.mermaid-dark svg')?.textContent ?? '',
+    localImage: await new Promise((resolve) => {
+      const image = document.querySelector('.ProseMirror img:not(.ProseMirror-separator)')
+      if (!image) return resolve(0)
+      if (image.complete) return resolve(image.naturalWidth)
+      image.addEventListener('load', () => resolve(image.naturalWidth), { once: true })
+      image.addEventListener('error', () => resolve(0), { once: true })
+    }),
   }))
   if (result.katex !== 2 || result.display !== 1 || !result.fontLoaded || !result.css.includes('KaTeX')) {
     throw new Error(`打包版公式资源验证失败: ${JSON.stringify(result)}`)
@@ -58,6 +68,7 @@ try {
   if (result.mermaidSvgs !== 2 || !result.mermaidText.includes('开始')) {
     throw new Error(`打包版 Mermaid 渲染验证失败: ${JSON.stringify(result)}`)
   }
+  if (result.localImage !== 1) throw new Error(`打包版本地图片显示失败: ${JSON.stringify(result)}`)
   if (policyViolations.length) throw new Error(`打包版违反内容安全策略: ${policyViolations.join(' | ')}`)
   const menuLabels = (name) => app.evaluate(({ Menu }, menu) => Menu.getApplicationMenu()?.items
     .find((item) => item.label.includes(menu))?.submenu?.items.map((item) => item.label) ?? [], name)

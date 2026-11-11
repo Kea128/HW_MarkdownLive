@@ -9,11 +9,16 @@ const crepeState = vi.hoisted(() => ({
   blur: undefined as undefined | (() => void),
   action: vi.fn(),
   destroy: vi.fn(),
+  features: {} as Record<string, boolean>,
   featureConfigs: {} as Record<string, Record<string, unknown>>,
 }))
 
 vi.mock('@milkdown/kit/utils', () => ({
   replaceAll: vi.fn((markdown: string) => ({ markdown })),
+}))
+
+vi.mock('../src/editor-images', () => ({
+  installImagePlugins: vi.fn(),
 }))
 
 vi.mock('../src/mermaid-preview', () => ({
@@ -30,6 +35,7 @@ vi.mock('@milkdown/crepe', () => {
       Toolbar: 'Toolbar',
       Placeholder: 'Placeholder',
       BlockEdit: 'BlockEdit',
+      ImageBlock: 'ImageBlock',
     }
     editor = { action: crepeState.action }
     private root: HTMLElement
@@ -37,10 +43,12 @@ vi.mock('@milkdown/crepe', () => {
     constructor(options: {
       root: HTMLElement
       defaultValue: string
+      features: Record<string, boolean>
       featureConfigs: Record<string, Record<string, unknown>>
     }) {
       this.root = options.root
       crepeState.markdown = options.defaultValue
+      crepeState.features = options.features
       crepeState.featureConfigs = options.featureConfigs
     }
 
@@ -72,6 +80,8 @@ vi.mock('@milkdown/crepe', () => {
 })
 
 import WysiwygEditor from '../src/WysiwygEditor'
+import { installImagePlugins } from '../src/editor-images'
+import { toImageUrl } from '../src/image-source'
 import { renderMermaidPreview } from '../src/mermaid-preview'
 
 describe('WysiwygEditor 生命周期', () => {
@@ -147,6 +157,19 @@ describe('WysiwygEditor 生命周期', () => {
       .toEqual(['复制', '编辑', '隐藏'])
     const blockEdit = crepeState.featureConfigs.BlockEdit as { blockHandle: { getOffset: () => number } }
     expect(blockEdit.blockHandle.getOffset()).toBe(6)
+  })
+
+  it('关闭会改写图片说明的图片块，并按当前文档位置解析本地图片', async () => {
+    const { rerender } = render(<WysiwygEditor markdown="# 初始" documentPath={'C:\\笔记\\a.md'} onChange={vi.fn()} />)
+    await screen.findByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    expect(crepeState.features.ImageBlock).toBe(false)
+    const options = vi.mocked(installImagePlugins).mock.calls.at(-1)![1]
+    expect(options.resolve('assets/图.png')).toBe(toImageUrl('C:\\笔记\\assets\\图.png'))
+    expect(options.resolve('https://example.com/a.png')).toBe('https://example.com/a.png')
+    rerender(<WysiwygEditor markdown="# 初始" documentPath={'D:\\其他\\b.md'} onChange={vi.fn()} />)
+    expect(options.documentPath()).toBe('D:\\其他\\b.md')
+    expect(options.resolve('a.png')).toBe(toImageUrl('D:\\其他\\a.png'))
+    expect(options.pathForFile(new File([''], 'x.png'))).toBe('C:\\测试\\文档.md')
   })
 
   it('拦截安全外链并遵循减少动态效果设置', async () => {

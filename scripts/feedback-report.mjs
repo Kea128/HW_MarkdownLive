@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { resolveGitHubToken } from './github-token.mjs'
 
 const taxonomyPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'feedback-taxonomy.json')
 const taxonomy = JSON.parse(readFileSync(taxonomyPath, 'utf8'))
@@ -90,6 +91,17 @@ export function parseJsonl(text) {
       return []
     }
   })
+}
+
+export function isFeedbackIssue(issue) {
+  if (issue.pull_request) return false
+  const labels = (issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name)
+  return /^\s*\[反馈\]/.test(issue.title ?? '') || labels.includes('feedback')
+}
+
+export function needsLabels(issue) {
+  const labels = (issue.labels ?? []).map((label) => typeof label === 'string' ? label : label.name)
+  return !labels.includes('feedback') || !labels.some((name) => name.startsWith('type:'))
 }
 
 export function labelsFor(record) {
@@ -230,8 +242,9 @@ export function renderReport(records, generatedAt = new Date()) {
   return lines.join('\n')
 }
 
+let token
 async function github(pathname, { method = 'GET', body } = {}) {
-  const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
+  token ??= resolveGitHubToken() ?? ''
   const response = await fetch(`https://api.github.com${pathname}`, {
     method,
     headers: {
@@ -250,8 +263,8 @@ async function github(pathname, { method = 'GET', body } = {}) {
 async function fetchIssues(repository, state) {
   const issues = []
   for (let page = 1; page <= 30; page += 1) {
-    const batch = await github(`/repos/${repository}/issues?labels=feedback&state=${state}&per_page=100&page=${page}`)
-    issues.push(...batch.filter((issue) => !issue.pull_request))
+    const batch = await github(`/repos/${repository}/issues?state=${state}&per_page=100&page=${page}`)
+    issues.push(...batch.filter(isFeedbackIssue))
     if (batch.length < 100) break
   }
   return issues
@@ -287,10 +300,11 @@ const USAGE = `用法：node scripts/feedback-report.mjs [选项]
   --local              汇总本机 Inkdown 保存的反馈记录（%APPDATA%\\Inkdown\\feedback\\feedback.jsonl）
   --jsonl <文件>       汇总指定的反馈记录文件，可重复使用
   --out <文件>         把报告写入文件，默认输出到终端
-  --label-issue <编号> 为指定 issue 按类型、功能和关键词打标签（供 GitHub Actions 使用）`
+  --label-issue <编号> 为指定 issue 按类型、功能和关键词打标签（供 GitHub Actions 使用）
+  --label-missing      为所有尚未打标签的反馈 issue 补打标签（GitHub Actions 不可用时在本地运行）`
 
 async function main(argv) {
-  const options = { github: false, all: false, jsonl: [], out: null, labelIssue: null }
+  const options = { github: false, all: false, jsonl: [], out: null, labelIssue: null, labelMissing: false }
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]
     if (argument === '--github') options.github = true
@@ -300,11 +314,17 @@ async function main(argv) {
     } else if (argument === '--jsonl') options.jsonl.push(argv[++index])
     else if (argument === '--out') options.out = argv[++index]
     else if (argument === '--label-issue') options.labelIssue = Number(argv[++index])
+    else if (argument === '--label-missing') options.labelMissing = true
     else if (argument === '--help' || argument === '-h') return console.log(USAGE)
     else throw new Error(`未知参数：${argument}\n\n${USAGE}`)
   }
   const repository = process.env.GITHUB_REPOSITORY || DEFAULT_REPOSITORY
   if (options.labelIssue) return labelIssue(repository, options.labelIssue)
+  if (options.labelMissing) {
+    const pending = (await fetchIssues(repository, 'open')).filter(needsLabels)
+    for (const issue of pending) await labelIssue(repository, issue.number)
+    return console.log(pending.length ? `已为 ${pending.length} 条反馈补打标签。` : '所有反馈 issue 均已打标签。')
+  }
   if (!options.jsonl.length) options.github = true
 
   const records = []

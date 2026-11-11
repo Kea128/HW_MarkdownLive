@@ -5,8 +5,8 @@ import {
   createFeedbackRecord, FEEDBACK_AREAS, FEEDBACK_TYPES, feedbackIssueUrl, feedbackTags, formatFeedback, validateFeedback,
 } from '../src/feedback'
 import {
-  groupThemes, issueToRecord, keywordTags, labelDefinitions, labelsFor, parseIssueBody, parseJsonl, renderReport,
-  similarGroups,
+  groupThemes, isFeedbackIssue, issueToRecord, keywordTags, labelDefinitions, labelsFor, needsLabels, parseIssueBody,
+  parseJsonl, renderReport, similarGroups,
 } from '../scripts/feedback-report.mjs'
 
 const input: FeedbackInput = {
@@ -37,6 +37,7 @@ describe('意见反馈', () => {
     expect(feedbackTags(text)).toEqual(['layout', 'table'])
     expect(keywordTags(text)).toEqual(feedbackTags(text))
     expect(feedbackTags('打开文件夹后应用崩溃')).toEqual(['crash', 'files'])
+    expect(feedbackTags('打开原始typora文件（其中包含图片位置），无法渲染图片')).toEqual(['image', 'compat'])
     expect(feedbackTags('一切正常')).toEqual([])
   })
 
@@ -103,6 +104,16 @@ describe('反馈汇总脚本', () => {
     expect(labelsFor(record)).toEqual(['feedback', 'type:bug', 'area:table', 'tag:layout', 'tag:table'])
     for (const label of labelsFor(record)) expect(labelDefinitions()[label]).toBeDefined()
     expect(issueToRecord({ number: 3, title: '随便说说', body: '' })).toMatchObject({ id: 'github-3', type: 'other', area: 'other' })
+  })
+
+  it('按标题或标签识别反馈 issue，并找出尚未分类的反馈', () => {
+    expect(isFeedbackIssue({ title: '[反馈] 图片问题', labels: [] })).toBe(true)
+    expect(isFeedbackIssue({ title: '其他问题', labels: [{ name: 'feedback' }] })).toBe(true)
+    expect(isFeedbackIssue({ title: '[反馈] 合并请求', labels: [], pull_request: {} })).toBe(false)
+    expect(isFeedbackIssue({ title: 'Bug', labels: ['bug'] })).toBe(false)
+    expect(needsLabels({ labels: [] })).toBe(true)
+    expect(needsLabels({ labels: [{ name: 'feedback' }] })).toBe(true)
+    expect(needsLabels({ labels: [{ name: 'feedback' }, { name: 'type:bug' }] })).toBe(false)
   })
 
   it('读取本机 JSONL 记录并忽略损坏行', () => {

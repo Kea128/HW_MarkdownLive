@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { releaseNotesToText } from '../electron/main/update-policy'
 import { changelogSection, updateNotes, withReleaseNotes } from '../scripts/changelog.mjs'
 
 const changelog = `# 更新日志
@@ -33,6 +34,12 @@ describe('发布说明', () => {
     expect(updateNotes(section)).toBe('在线更新\n• 修复 代理 问题，详见 文档。\n• 支持 取消下载。\n升级提示')
     expect(updateNotes(section, 20)).toBe('在线更新\n…')
     expect(updateNotes('一二三四五六', 4)).toBe('一二三…')
+  })
+
+  it('转义说明中的 HTML 字符，软件内按原样显示', () => {
+    const notes = updateNotes('- 以 `<img style="zoom:50%">` 保存的图片 & `<center>` 居中')
+    expect(notes).toBe('• 以 &lt;img style="zoom:50%"&gt; 保存的图片 &amp; &lt;center&gt; 居中')
+    expect(releaseNotesToText(notes)).toBe('• 以 <img style="zoom:50%"> 保存的图片 & <center> 居中')
   })
 
   it('把说明写入 latest.yml 的块字符串', () => {

@@ -28,6 +28,8 @@
     { "id": "files", "label": "文件/文件夹", "keywords": ["文件夹", "打开文件", "保存", "另存", "folder"] },
     { "id": "update", "label": "更新", "keywords": ["更新", "升级", "update", "upgrade"] },
     { "id": "shortcut", "label": "快捷键", "keywords": ["快捷键", "shortcut", "ctrl+"] },
-    { "id": "export", "label": "导出/打印", "keywords": ["导出", "打印", "pdf", "html", "export", "print"] }
+    { "id": "export", "label": "导出/打印", "keywords": ["导出", "打印", "pdf", "html", "export", "print"] },
+    { "id": "image", "label": "图片", "keywords": ["图片", "插图", "截图", "image", "img"] },
+    { "id": "compat", "label": "兼容性", "keywords": ["typora", "obsidian", "兼容", "导入"] }
   ]
 }

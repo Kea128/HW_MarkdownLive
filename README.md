@@ -14,6 +14,7 @@ HTTP 服务或云端账号。
 - 保存和文件切换前强制同步最后一次编辑，避免快速操作写入旧内容
 - GFM、任务列表、表格、安全链接、代码高亮、KaTeX 数学公式和 XSS 白名单净化
 - Mermaid 12.3.0 图表：流程图、时序图、类图、甘特图、思维导图、用例图等，跟随明暗主题
+- 兼容 Typora 的本地图片：相对路径、绝对路径、`file://` 链接以及缩放后保存的 `<img>`
 - 单栏所见即所得编辑，按 `Ctrl+/` 在排版视图与 Markdown 源码间切换
 - 打开文件夹（`Ctrl+Shift+O`）后在侧栏浏览并打开其中所有 Markdown 文件
 - 可拖动调整宽度的侧栏（文件 / 大纲）、源码行号、当前行提示、紧凑/标准/宽松三档排版和窄窗口布局
@@ -50,7 +51,12 @@ HTTP 服务或云端账号。
 npm run feedback:report -- --out feedback-report.md            # GitHub 上未关闭的反馈
 npm run feedback:report -- --all --local --out feedback-report.md   # 含已关闭反馈和本机记录
 npm run feedback:report -- --jsonl 收集到的\feedback.jsonl     # 汇总他人发来的记录文件
+npm run feedback:report -- --label-missing                      # 为未打标签的反馈补打标签
 ```
+
+自动打标签的工作流依赖 GitHub Actions；账户的 Actions 不可用时（例如计费问题导致任务无法启动），用
+`--label-missing` 在本地补打标签。脚本优先读取 `GH_TOKEN`，否则复用 git 已保存的 github.com 凭据；
+需要代理时先设置 `HTTPS_PROXY`。
 
 ## 架构与安全
 
@@ -64,6 +70,8 @@ tests/               单元、组件和 Playwright Electron E2E
 BrowserWindow 使用 `contextIsolation: true`、`nodeIntegration: false` 和 `sandbox: true`。
 渲染进程不能任意读取文件或执行命令；主进程验证 IPC 来源、文件扩展名、绝对路径、内容大小和外链协议。
 文件夹列表只扫描用户在系统对话框中选择的文件夹，renderer 无法指定扫描路径。
+本地图片经 `inkdown-image:` 协议由主进程读取，仅限图片扩展名的绝对路径；内容安全策略只允许 `<img>` 加载该协议，
+页面脚本无法用 `fetch` 读取图片内容。
 应用不加载远程页面，禁止 renderer 导航和新窗口。仅 `http:`、`https:`、`mailto:` 外链通过受控
 `shell.openExternal` 交给系统默认程序。在线更新只在用户手动检查时由主进程访问 GitHub，renderer
 仍然没有网络权限；下载的安装包必须与 `latest.yml` 中的 SHA-512 一致才会运行。
@@ -113,6 +121,19 @@ $$
 公式内部。把光标放到正文任意位置，再从“引用公式”下拉菜单选择目标即可插入引用。排版视图会
 自动显示连续编号“式 (1)、式 (2)…”，点击引用会滚动并高亮对应公式。调整公式顺序后，显示编号
 和所有引用会自动同步，无需手工修改数字。
+
+## 图片
+
+Inkdown 按 Typora 的规则解析图片路径，打开 Typora 写的文档无需修改：
+
+- 相对路径（`assets/a.png`、`./笔记.assets/image-20240101.png`、`../共享/logo.svg`）相对于文档所在文件夹；
+  以 `/` 开头的路径相对于文档所在磁盘的根目录。
+- 绝对路径（如 Typora 默认的 `C:\Users\…\typora-user-images\image-20240101.png`）、`file:///` 链接和 UNC 路径直接读取。
+- 路径中的空格可以写成 `%20`，或用尖括号包住整个路径：`![截图](<assets/my image.png>)`。
+- Typora 缩放图片后保存的 `<img src="…" style="zoom:50%;" />` 按比例显示，`<center>` 或 `align` 居中同样生效。
+- 把图片文件拖进编辑区会插入它的路径：位于文档所在文件夹内时写相对路径，否则写绝对路径。
+
+未保存的新文档没有所在文件夹，其中的相对路径图片要在保存后才能显示。
 
 ## Mermaid 图表
 
@@ -177,7 +198,7 @@ Electron E2E 会实际启动桌面进程，验证文件打开、所见即所得�
 npm run release
 ```
 
-发布结果位于 `releases/Inkdown-v2.8.1-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
+发布结果位于 `releases/Inkdown-v2.8.2-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
 ZIP、在线更新描述文件 `latest.yml` 与差分 blockmap、中文说明、CHANGELOG 和 SHA-256。发布目录不含源码、
 测试缓存或 `node_modules`。发布命令会先执行完整验证与打包版冒烟，成功后删除旧版本和 `release-build` 中间目录。
 软件内“发现新版本”显示的更新内容取自 CHANGELOG 中对应版本的段落，转换为纯文本并按整行控制在 560 字以内
@@ -190,8 +211,8 @@ ZIP、在线更新描述文件 `latest.yml` 与差分 blockmap、中文说明、
 提交发布内容并推送同名版本标签后，上传 Release：
 
 ```powershell
-git tag -a v2.8.1 -m "Inkdown 2.8.1"
-git push origin main v2.8.1
+git tag -a v2.8.2 -m "Inkdown 2.8.2"
+git push origin main v2.8.2
 npm run publish:github
 ```
 

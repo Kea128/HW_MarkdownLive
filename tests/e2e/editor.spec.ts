@@ -2,12 +2,35 @@ import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { crc32, deflateSync } from 'node:zlib'
 import { _electron as electron, expect, test } from '@playwright/test'
 
 const localElectron = path.resolve(
   'node_modules', 'electron', 'dist',
   process.platform === 'win32' ? 'electron.exe' : 'electron',
 )
+
+function png(width: number, height: number, color: [number, number, number]): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data])
+    const frame = Buffer.alloc(8 + data.length + 4)
+    frame.writeUInt32BE(data.length, 0)
+    body.copy(frame, 4)
+    frame.writeUInt32BE(crc32(body), 8 + data.length)
+    return frame
+  }
+  const header = Buffer.alloc(13)
+  header.writeUInt32BE(width, 0)
+  header.writeUInt32BE(height, 4)
+  header.set([8, 2, 0, 0, 0], 8)
+  const row = Buffer.from([0, ...Array.from({ length: width }, () => color).flat()])
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(Buffer.concat(Array.from({ length: height }, () => row)))),
+    chunk('IEND', Buffer.alloc(0)),
+  ])
+}
 
 test('真实桌面进程完成打开、编辑、预览、菜单快捷键与覆盖保存', async () => {
   test.setTimeout(90_000)
@@ -389,6 +412,80 @@ test('打开文件夹、拖动侧栏、表格长代码换行、源码铺满并�
     expect(JSON.parse(stored[0])).toMatchObject({
       schema: 1, channel: 'github', type: 'bug', area: 'table', tags: ['layout', 'table'],
     })
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
+test('Typora 文档的本地图片与缩放图片正常显示，编辑后保留图片说明', async () => {
+  test.setTimeout(90_000)
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-images-'))
+  const folder = path.join(directory, '笔记')
+  await mkdir(path.join(folder, 'assets'), { recursive: true })
+  await mkdir(path.join(directory, '外部'), { recursive: true })
+  await writeFile(path.join(folder, 'assets', 'red.png'), png(40, 20, [220, 40, 40]))
+  await writeFile(path.join(folder, 'assets', 'my image.png'), png(30, 30, [40, 160, 60]))
+  await writeFile(path.join(folder, 'assets', 'zoom.png'), png(200, 100, [40, 90, 220]))
+  const absolute = path.join(directory, '外部', 'blue.png')
+  await writeFile(absolute, png(50, 25, [30, 30, 200]))
+  const filePath = path.join(folder, '图片.md')
+  await writeFile(filePath, [
+    '# 图片',
+    '',
+    '![相对路径](assets/red.png)',
+    '',
+    `![绝对路径](<${absolute}>)`,
+    '',
+    '文字中的 ![行内](assets/red.png) 图片。',
+    '',
+    '<img src="assets/zoom.png" alt="缩放" style="zoom:50%;" />',
+    '',
+    '![空格](<assets/my image.png>)',
+    '',
+    '![编码](assets/my%20image.png)',
+  ].join('\n'), 'utf8')
+  const app = await electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${path.join(directory, 'profile')}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  try {
+    const page = await app.firstWindow()
+    const consoleErrors: string[] = []
+    page.on('console', (message) => {
+      if (message.type() === 'error') consoleErrors.push(message.text())
+    })
+    await page.waitForLoadState('domcontentloaded')
+    await page.evaluate((target) => window.inkdown.document.openPath(target), filePath)
+    await expect(page.getByRole('heading', { name: '图片' })).toBeVisible()
+    const images = page.locator('.ProseMirror img:not(.ProseMirror-separator)')
+    await expect(images).toHaveCount(6)
+    await expect.poll(() => images.evaluateAll((elements) => elements.map((image) => (image as HTMLImageElement).naturalWidth)))
+      .toEqual([40, 50, 40, 200, 30, 30])
+    await expect(images.nth(0)).toHaveAttribute('alt', '相对路径')
+    const zoomed = page.locator('.html-image img')
+    await expect(zoomed).toHaveAttribute('alt', '缩放')
+    await expect(zoomed).toHaveCSS('zoom', '0.5')
+    await expect(page.locator('.ProseMirror')).not.toContainText('<img')
+    await page.waitForTimeout(600)
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+
+    await page.locator('.ProseMirror p').filter({ hasText: '文字中的' }).click({ position: { x: 4, y: 8 } })
+    await page.keyboard.press('End')
+    await page.keyboard.type('已编辑')
+    await expect(page.getByLabel('未保存')).toBeVisible()
+    await page.keyboard.press('Control+/')
+    const source = page.getByRole('textbox', { name: 'Markdown 源码' })
+    await expect(source).toHaveValue(/已编辑/)
+    const markdown = await source.inputValue()
+    expect(markdown).toContain('![相对路径](assets/red.png)')
+    expect(markdown).toContain('![行内](assets/red.png)')
+    expect(markdown).toContain('![空格](<assets/my image.png>)')
+    expect(markdown).toContain('<img src="assets/zoom.png" alt="缩放" style="zoom:50%;" />')
+    expect(markdown).not.toContain('![1.00]')
+    expect(consoleErrors.filter((text) => /Content Security Policy|Refused to|ERR_/i.test(text))).toEqual([])
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
     await new Promise((resolve) => setTimeout(resolve, 500))
