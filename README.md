@@ -218,5 +218,5 @@ npm run publish:github
 
 脚本会确认工作区干净、远端标签指向当前提交，并校验 SHA-256 与 `latest.yml` 中的 SHA-512，然后以草稿
 创建 Release、上传安装包、blockmap、便携版、ZIP 和 `SHA256SUMS.txt`，最后上传 `latest.yml` 并公开发布，
-避免客户端读到尚未上传完成的版本。凭据优先读取 `GH_TOKEN` 或 `GITHUB_TOKEN`，否则复用 git 已保存的
+避免客户端读到尚未上传完成的版本。上传因网络中断失败时会自动重试；仍失败时重新运行同一命令，已上传且校验一致的文件会被跳过。凭据优先读取 `GH_TOKEN` 或 `GITHUB_TOKEN`，否则复用 git 已保存的
 github.com 凭据；需要代理时先设置 `HTTPS_PROXY`。

@@ -84,10 +84,31 @@ const tagged = ref.object.type === 'tag'
 if (tagged !== head) throw new Error(`远端标签 ${tag} 指向 ${tagged.slice(0, 7)}，与当前提交 ${head.slice(0, 7)} 不一致`)
 
 const details = { name: `Inkdown ${version}`, body: releaseNotes() }
-const existing = (await github('GET', `${api}/releases?per_page=100`)).find((entry) => entry.tag_name === tag)
+// GitHub lists drafts as "untagged-…", so an interrupted run is resumed by matching the draft's name.
+const existing = (await github('GET', `${api}/releases?per_page=100`))
+  .find((entry) => entry.tag_name === tag || (entry.draft && entry.name === details.name))
 let release = existing
   ? await github('PATCH', `${api}/releases/${existing.id}`, { body: JSON.stringify(details) })
   : await github('POST', `${api}/releases`, { body: JSON.stringify({ ...details, tag_name: tag, draft: true }) })
+
+async function removeAsset(name) {
+  const current = (await github('GET', `${api}/releases/${release.id}`)).assets.find((asset) => asset.name === name)
+  if (current) await github('DELETE', `${api}/releases/assets/${current.id}`)
+}
+
+async function upload(name, data) {
+  const target = new URL(release.upload_url.replace(/\{.*\}$/, ''))
+  target.searchParams.set('name', name)
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await github('POST', target.href, { body: data, headers: { 'content-type': 'application/octet-stream' } })
+    } catch (error) {
+      if (!(error instanceof TypeError) || attempt === 3) throw error
+      console.log(`上传 ${name} 时网络中断（${error.cause?.code ?? error.message}），重试第 ${attempt} 次…`)
+      await removeAsset(name)
+    }
+  }
+}
 
 for (const name of assets) {
   const data = read(name)
@@ -96,16 +117,14 @@ for (const name of assets) {
     console.log(`跳过 ${name}（已存在）`)
     continue
   }
-  if (uploaded) await github('DELETE', `${api}/releases/assets/${uploaded.id}`)
-  const target = new URL(release.upload_url.replace(/\{.*\}$/, ''))
-  target.searchParams.set('name', name)
-  await github('POST', target.href, { body: data, headers: { 'content-type': 'application/octet-stream' } })
+  if (uploaded) await removeAsset(name)
+  await upload(name, data)
   console.log(`已上传 ${name}（${(data.length / 1024 / 1024).toFixed(1)} MB）`)
 }
 
 if (release.draft) {
   release = await github('PATCH', `${api}/releases/${release.id}`, {
-    body: JSON.stringify({ draft: false, make_latest: 'true' }),
+    body: JSON.stringify({ tag_name: tag, draft: false, make_latest: 'true' }),
   })
 }
 console.log(`已发布 ${release.html_url}`)
