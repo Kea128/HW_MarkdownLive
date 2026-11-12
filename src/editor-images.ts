@@ -1,17 +1,31 @@
 import { imageInlineComponent, inlineImageConfig } from '@milkdown/kit/component/image-inline'
-import type { Editor } from '@milkdown/kit/core'
+import { editorViewOptionsCtx, type Editor } from '@milkdown/kit/core'
 import { uploadConfig } from '@milkdown/kit/plugin/upload'
 import type { Node } from '@milkdown/kit/prose/model'
-import type { NodeViewConstructor } from '@milkdown/kit/prose/view'
+import { TextSelection } from '@milkdown/kit/prose/state'
+import type { EditorView, NodeViewConstructor } from '@milkdown/kit/prose/view'
 import { htmlSchema } from '@milkdown/kit/preset/commonmark'
 import { $view } from '@milkdown/kit/utils'
 import { parseHtmlImages } from './html-images'
-import { markdownImagePath } from './image-source'
+import { imageFiles, isImageFile, shouldPasteImages, type StoredImage } from './paste-images'
 
 interface ImageOptions {
   resolve(source: string): string
-  documentPath(): string | null
-  pathForFile(file: File): string
+  store(files: File[]): Promise<StoredImage[]>
+}
+
+async function insertImages(view: EditorView, files: File[], options: ImageOptions, at?: number) {
+  const before = view.state.doc
+  const images = await options.store(files)
+  if (!images.length || view.isDestroyed) return
+  const { state } = view
+  let tr = state.tr
+  if (at !== undefined && state.doc.eq(before)) {
+    tr = tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(at, tr.doc.content.size))))
+  }
+  for (const { src, alt } of images) tr = tr.replaceSelectionWith(state.schema.nodes.image.create({ src, alt }), false)
+  view.dispatch(tr.scrollIntoView())
+  view.focus()
 }
 
 const imageIcon = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" '
@@ -60,27 +74,38 @@ const htmlImageView = (resolve: ImageOptions['resolve']) => $view(htmlSchema.nod
 })
 
 export function installImagePlugins(editor: Editor, options: ImageOptions): void {
-  const imageSource = (file: File) => {
-    const filePath = options.pathForFile(file)
-    return filePath ? markdownImagePath(filePath, options.documentPath()) : URL.createObjectURL(file)
-  }
   editor
     .config((ctx) => {
+      // Direct view props run before Crepe's clipboard and upload plugins, which would insert unusable blob: URLs.
+      ctx.update(editorViewOptionsCtx, (previous) => ({
+        ...previous,
+        handlePaste: (view, event, slice) => {
+          if (previous.handlePaste?.(view, event, slice)) return true
+          if (!shouldPasteImages(event.clipboardData)) return false
+          void insertImages(view, imageFiles(event.clipboardData), options)
+          return true
+        },
+        handleDrop: (view, event, slice, moved) => {
+          if (previous.handleDrop?.(view, event, slice, moved)) return true
+          const files = moved ? [] : imageFiles(event.dataTransfer)
+          if (!files.length) return false
+          void insertImages(view, files, options, view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos)
+          return true
+        },
+      }))
       ctx.update(inlineImageConfig.key, (value) => ({
         ...value,
         imageIcon,
         uploadButton: '选择图片',
         confirmButton: '确定',
         uploadPlaceholderText: '或粘贴图片链接',
-        onUpload: async (file) => imageSource(file),
+        onUpload: async (file) => (await options.store([file]))[0]?.src ?? '',
         proxyDomURL: options.resolve,
       }))
       ctx.update(uploadConfig.key, (value) => ({
         ...value,
-        uploader: async (files, schema) => Array.from(files)
-          .filter((file) => file.type.startsWith('image/'))
-          .map((file) => schema.nodes.image.createAndFill({ src: imageSource(file), alt: file.name.replace(/\.[^.]+$/, '') }))
-          .filter((node): node is Node => node !== null),
+        uploader: async (files, schema) => (await options.store(Array.from(files).filter(isImageFile)))
+          .map(({ src, alt }) => schema.nodes.image.create({ src, alt })),
       }))
     })
     .use(imageInlineComponent)

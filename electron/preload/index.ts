@@ -47,6 +47,9 @@ const api: InkdownApi = {
     openFolder: () => ipcRenderer.invoke(IPC.feedbackOpenFolder),
     onShow: (listener) => subscription<void>(IPC.feedbackShow, () => listener()),
   },
+  images: {
+    save: (input) => ipcRenderer.invoke(IPC.imageSave, input),
+  },
 }
 
 contextBridge.exposeInMainWorld('inkdown', Object.freeze(api))

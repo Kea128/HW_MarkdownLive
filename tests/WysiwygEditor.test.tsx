@@ -166,10 +166,16 @@ describe('WysiwygEditor 生命周期', () => {
     const options = vi.mocked(installImagePlugins).mock.calls.at(-1)![1]
     expect(options.resolve('assets/图.png')).toBe(toImageUrl('C:\\笔记\\assets\\图.png'))
     expect(options.resolve('https://example.com/a.png')).toBe('https://example.com/a.png')
-    rerender(<WysiwygEditor markdown="# 初始" documentPath={'D:\\其他\\b.md'} onChange={vi.fn()} />)
-    expect(options.documentPath()).toBe('D:\\其他\\b.md')
+    const onNotice = vi.fn()
+    rerender(<WysiwygEditor markdown="# 初始" documentPath={'D:\\其他\\b.md'} onChange={vi.fn()} onNotice={onNotice} />)
     expect(options.resolve('a.png')).toBe(toImageUrl('D:\\其他\\a.png'))
-    expect(options.pathForFile(new File([''], 'x.png'))).toBe('C:\\测试\\文档.md')
+    vi.mocked(window.inkdown.document.pathForFile).mockReturnValueOnce('')
+    await expect(options.store([new File(['png'], 'image.png', { type: 'image/png' })])).resolves.toEqual([{
+      src: '初始.assets/image-20261112170000000.png',
+      alt: 'image-20261112170000000',
+      notice: '图片已保存到 初始.assets/image-20261112170000000.png',
+    }])
+    expect(onNotice).toHaveBeenCalledWith('图片已保存到 初始.assets/image-20261112170000000.png')
   })
 
   it('拦截安全外链并遵循减少动态效果设置', async () => {

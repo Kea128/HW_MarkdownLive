@@ -57,5 +57,8 @@ Object.defineProperty(window, 'inkdown', {
       openFolder: vi.fn(async () => undefined),
       onShow: vi.fn(() => () => undefined),
     },
+    images: {
+      save: vi.fn(async () => ({ ok: true, src: '初始.assets/image-20261112170000000.png', location: 'saved' })),
+    },
   },
 })

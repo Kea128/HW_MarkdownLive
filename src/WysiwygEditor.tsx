@@ -9,6 +9,7 @@ import { resolveImageSource } from './image-source'
 import { normalizeMathDelimiters } from './markdown'
 import { mermaidLanguage } from './mermaid-language'
 import { isMermaidLanguage, renderMermaidPreview } from './mermaid-preview'
+import { storeImages } from './paste-images'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
 import 'katex/dist/katex.min.css'
@@ -17,16 +18,18 @@ interface Props {
   markdown: string
   documentPath?: string | null
   onChange: (markdown: string) => void
+  onNotice?: (message: string) => void
 }
 
 const toEditorMarkdown = (markdown: string) =>
   prepareEquationMarkdown(normalizeMathDelimiters(markdown))
 
-export default function WysiwygEditor({ markdown, documentPath = null, onChange }: Props) {
+export default function WysiwygEditor({ markdown, documentPath = null, onChange, onNotice }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<Crepe | null>(null)
   const readyRef = useRef(false)
   const onChangeRef = useRef(onChange)
+  const onNoticeRef = useRef(onNotice)
   const documentPathRef = useRef(documentPath)
   const latestMarkdownRef = useRef(markdown)
   const editorMarkdownRef = useRef(toEditorMarkdown(markdown))
@@ -39,6 +42,7 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange 
   const [failed, setFailed] = useState(false)
 
   onChangeRef.current = onChange
+  onNoticeRef.current = onNotice
   documentPathRef.current = documentPath
   latestMarkdownRef.current = markdown
 
@@ -113,8 +117,7 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange 
     })
     installImagePlugins(crepe.editor, {
       resolve: (source) => resolveImageSource(source, documentPathRef.current),
-      documentPath: () => documentPathRef.current,
-      pathForFile: (file) => window.inkdown.document.pathForFile(file),
+      store: (files) => storeImages(files, (message) => onNoticeRef.current?.(message)),
     })
     crepeRef.current = crepe
     const publishCurrentMarkdown = () => {

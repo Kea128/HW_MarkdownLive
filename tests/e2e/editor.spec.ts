@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { crc32, deflateSync } from 'node:zlib'
@@ -486,6 +486,87 @@ test('Typora 文档的本地图片与缩放图片正常显示，编辑后保留�
     expect(markdown).toContain('<img src="assets/zoom.png" alt="缩放" style="zoom:50%;" />')
     expect(markdown).not.toContain('![1.00]')
     expect(consoleErrors.filter((text) => /Content Security Policy|Refused to|ERR_/i.test(text))).toEqual([])
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
+test('Ctrl+V 粘贴截图保存到文档同名 .assets 文件夹，未保存文档首次保存时移入', async () => {
+  test.setTimeout(90_000)
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-paste-'))
+  const folder = path.join(directory, '笔记')
+  await mkdir(folder, { recursive: true })
+  const filePath = path.join(folder, '周报.md')
+  await writeFile(filePath, '# 周报\n\n本周进展', 'utf8')
+  const profile = path.join(directory, 'profile')
+  const app = await electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${profile}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  const paste = (image: Buffer, html?: string) => app.evaluate(({ BrowserWindow, clipboard, nativeImage }, data) => {
+    const bitmap = nativeImage.createFromBuffer(Buffer.from(data.image, 'base64'))
+    if (data.html) clipboard.write({ html: data.html, text: '来自 Word 的文字', image: bitmap })
+    else clipboard.writeImage(bitmap)
+    BrowserWindow.getAllWindows()[0].webContents.paste()
+  }, { image: image.toString('base64'), html })
+  const timestamped = /^image-\d{17}(?:-\d+)?\.png$/
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await page.evaluate((target) => window.inkdown.document.openPath(target), filePath)
+    await page.locator('.ProseMirror p').filter({ hasText: '本周进展' }).click()
+    await page.keyboard.press('End')
+    await paste(png(64, 32, [200, 60, 60]))
+    const images = page.locator('.ProseMirror img:not(.ProseMirror-separator)')
+    await expect(images).toHaveCount(1)
+    await expect.poll(() => images.first().evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(64)
+    await expect(page.locator('.status-messages')).toContainText('图片已保存到 周报.assets/image-')
+    const assets = path.join(folder, '周报.assets')
+    expect((await readdir(assets)).filter((name) => timestamped.test(name))).toHaveLength(1)
+
+    await paste(png(30, 30, [0, 0, 0]), '<p>来自 Word 的文字</p>')
+    await expect(page.locator('.ProseMirror')).toContainText('来自 Word 的文字')
+    await expect(images).toHaveCount(1)
+
+    await page.getByTitle('保存 (Ctrl+S)').click()
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+    expect(await readFile(filePath, 'utf8')).toMatch(/本周进展!\[image-\d{17}\]\(周报\.assets\/image-\d{17}\.png\)/)
+
+    await page.keyboard.press('Control+/')
+    const source = page.getByRole('textbox', { name: 'Markdown 源码' })
+    await source.click()
+    await page.keyboard.press('Control+End')
+    await paste(png(48, 24, [60, 60, 200]))
+    await expect(source).toHaveValue(/!\[image-\d{17}(?:-\d+)?\]\(周报\.assets\/image-\d{17}(?:-\d+)?\.png\)$/)
+    expect((await source.inputValue()).match(/周报\.assets\//g)).toHaveLength(2)
+    expect((await readdir(assets)).filter((name) => timestamped.test(name))).toHaveLength(2)
+    await page.keyboard.press('Control+/')
+    await page.getByTitle('保存 (Ctrl+S)').click()
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+
+    await page.getByTitle('新建 (Ctrl+N)').click()
+    await expect(page.locator('.title-area')).toContainText('未命名')
+    await page.locator('.ProseMirror').click()
+    await paste(png(40, 40, [60, 160, 60]))
+    await expect(page.locator('.status-messages')).toContainText('图片已暂存')
+    await expect.poll(() => images.first().evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(40)
+    const staging = path.join(profile, 'pasted-images')
+    expect(await readdir(staging)).toHaveLength(1)
+
+    const newPath = path.join(folder, '新文档.md')
+    await app.evaluate(({ dialog }, target) => {
+      dialog.showSaveDialog = (async () => ({ canceled: false, filePath: target })) as typeof dialog.showSaveDialog
+    }, newPath)
+    await page.getByTitle('保存 (Ctrl+S)').click()
+    await expect.poll(() => readFile(newPath, 'utf8').catch(() => ''))
+      .toMatch(/^!\[image-\d{17}\]\(新文档\.assets\/image-\d{17}\.png\)\n?$/)
+    expect(await readdir(path.join(folder, '新文档.assets'))).toHaveLength(1)
+    expect(await readdir(staging)).toEqual([])
+    await expect(page.locator('.title-area')).toContainText('新文档.md')
+    await expect.poll(() => images.first().evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(40)
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
     await new Promise((resolve) => setTimeout(resolve, 500))

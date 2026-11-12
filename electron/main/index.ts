@@ -18,13 +18,14 @@ import {
   type OpenDialogOptions,
 } from 'electron'
 import {
-  IPC, type FeedbackResult, type Theme, type UpdateState, type ViewMode, type WorkspaceSnapshot,
+  IPC, type FeedbackResult, type ImageFolderMode, type Theme, type UpdateState, type ViewMode, type WorkspaceSnapshot,
 } from '../../src/contracts'
 import { createFeedbackRecord, feedbackIssueUrl, formatFeedback, validateFeedback } from '../../src/feedback'
 import { DocumentController } from './document-controller'
 import { appendFeedback } from './feedback-store'
 import { FileService } from './file-service'
 import { registerImageScheme, serveLocalImages } from './image-protocol'
+import { relocateImages, removeStagedImages, saveImage } from './image-store'
 import { SettingsStore } from './settings-store'
 import { UpdateController } from './update-controller'
 import { detectInstallKind, RELEASES_URL, REPOSITORY_URL, type InstallKind } from './update-policy'
@@ -74,6 +75,13 @@ const installKindLabels: Record<InstallKind, string> = {
   development: '开发版',
 }
 const feedbackFile = () => path.join(app.getPath('userData'), 'feedback', 'feedback.jsonl')
+const stagedImages = () => path.join(app.getPath('userData'), 'pasted-images')
+const imageMode = () => settings.get().imageFolder ?? 'document-assets'
+const imageFolderOptions: Array<{ mode: ImageFolderMode; label: string }> = [
+  { mode: 'document-assets', label: '与文档同名的 .assets 文件夹（推荐）' },
+  { mode: 'document-name', label: '与文档同名的文件夹' },
+  { mode: 'shared-assets', label: '文档所在目录的 assets 文件夹' },
+]
 
 function serializeWorkspace<T>(task: () => Promise<T>): Promise<T> {
   const run = workspaceTask.then(task, task)
@@ -204,6 +212,10 @@ async function createWindow(): Promise<void> {
       void settings.addRecent(filePath).then(() => buildMenu())
       syncWorkspaceWith(filePath)
     },
+    async (content, from, to) => {
+      const images = await relocateImages(content, { from, to, stagingDir: stagedImages(), mode: imageMode() })
+      return { content: images.content, commit: () => removeStagedImages(images.staged) }
+    },
   )
   documentsReady = true
   installKind = detectInstallKind({
@@ -318,6 +330,9 @@ function registerIpc(): void {
   ipcMain.handle(IPC.workspaceOpen, (event) => trustedEvent(event.sender.id) ? chooseWorkspace() : null)
   ipcMain.handle(IPC.workspaceRefresh, (event) => trustedEvent(event.sender.id) ? refreshWorkspace() : null)
   ipcMain.handle(IPC.workspaceClose, (event) => trustedEvent(event.sender.id) ? closeWorkspace() : null)
+  ipcMain.handle(IPC.imageSave, (event, input) => trustedEvent(event.sender.id)
+    ? saveImage(input, { documentPath: documents.current().filePath, stagingDir: stagedImages(), mode: imageMode() })
+    : { ok: false, error: '请求无效' })
   ipcMain.handle(IPC.feedbackSubmit, (event, input, channel) =>
     trustedEvent(event.sender.id) ? submitFeedback(input, channel) : { ok: false, error: '请求无效' })
   ipcMain.handle(IPC.feedbackOpenFolder, async (event) => {
@@ -361,6 +376,16 @@ function buildMenu(): void {
         { type: 'separator' },
         { label: '保存', accelerator: 'Ctrl+S', click: () => send(IPC.documentCommand, { action: 'save' }) },
         { label: '另存为…', accelerator: 'Ctrl+Shift+S', click: () => send(IPC.documentCommand, { action: 'saveAs' }) },
+        { type: 'separator' },
+        {
+          label: '图片保存位置',
+          submenu: imageFolderOptions.map(({ mode, label }): MenuItemConstructorOptions => ({
+            label,
+            type: 'radio',
+            checked: imageMode() === mode,
+            click: () => void settings.update({ imageFolder: mode }).then(() => buildMenu()),
+          })),
+        },
         { type: 'separator' },
         { label: '退出', accelerator: 'Alt+F4', click: () => mainWindow?.close() },
       ],

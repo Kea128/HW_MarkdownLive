@@ -1,5 +1,5 @@
 import {
-  lazy, Suspense, useEffect, useMemo, useRef, useState,
+  lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState,
   type CSSProperties, type DragEvent, type KeyboardEvent,
 } from 'react'
 import {
@@ -12,6 +12,7 @@ import { FeedbackDialog } from './FeedbackDialog'
 import { useDesktopDocument } from './hooks/useDesktopDocument'
 import { useSourceEditorActions } from './hooks/useSourceEditorActions'
 import { useWorkspace } from './hooks/useWorkspace'
+import { draggingImages, imageFiles, imageMarkdown, shouldPasteImages, storeImages } from './paste-images'
 import { Sidebar, type OutlineItem, type SidebarView } from './Sidebar'
 import { readSidebarWidth, SIDEBAR_WIDTH } from './sidebar-width'
 import { getDocumentStats, type EditorMode } from './utils'
@@ -56,6 +57,13 @@ function App() {
   const [sidebarView, setSidebarView] = useState<SidebarView>('outline')
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const showNotice = useCallback((message: string) => {
+    clearTimeout(noticeTimer.current)
+    setNotice(message)
+    noticeTimer.current = setTimeout(() => setNotice(null), 5_000)
+  }, [])
   const { workspace, openFolder, refreshFolder, closeFolder } = useWorkspace(() => {
     setSidebarOpen(true)
     setSidebarView('files')
@@ -93,6 +101,13 @@ function App() {
     content: activeDocument.content,
     updateContent,
   })
+  const insertLiteralRef = useRef(insertLiteral)
+  insertLiteralRef.current = insertLiteral
+
+  const insertSourceImages = async (files: File[]) => {
+    const images = await storeImages(files, showNotice)
+    if (images.length) insertLiteralRef.current(images.map(imageMarkdown).join('\n'))
+  }
 
   useEffect(() => {
     const applyTheme = (value: Theme) => {
@@ -342,6 +357,18 @@ function App() {
                 onSelect={updateCurrentLine} onScroll={(event) => {
                   if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = event.currentTarget.scrollTop
                 }}
+                onPaste={(event) => {
+                  if (!shouldPasteImages(event.clipboardData)) return
+                  event.preventDefault()
+                  void insertSourceImages(imageFiles(event.clipboardData))
+                }}
+                onDragOver={(event) => { if (draggingImages(event.dataTransfer)) event.preventDefault() }}
+                onDrop={(event) => {
+                  const files = imageFiles(event.dataTransfer)
+                  if (!files.length) return
+                  event.preventDefault()
+                  void insertSourceImages(files)
+                }}
                 wrap="off" spellCheck aria-label="Markdown 源码" placeholder="开始写作…" />
             </div>
           </section>
@@ -349,7 +376,7 @@ function App() {
           <section className="visual-pane" aria-label="Markdown 所见即所得区域">
             <Suspense fallback={<div className="visual-editor-loading" aria-label="正在准备所见即所得编辑器" />}>
               <WysiwygEditor markdown={activeDocument.content} documentPath={activeDocument.filePath}
-                onChange={updateContent} />
+                onChange={updateContent} onNotice={showNotice} />
             </Suspense>
           </section>
         )}
@@ -359,7 +386,7 @@ function App() {
       {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
       <footer className="statusbar" aria-live="polite">
         <div className="status-messages">
-          <span>{status}</span>
+          <span>{notice ?? status}</span>
           {updateMessage && (
             <span className="update-status" aria-live={updateState.phase === 'downloading' ? 'off' : undefined}>
               {updateMessage}

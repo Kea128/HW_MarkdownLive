@@ -69,6 +69,20 @@ try {
     throw new Error(`打包版 Mermaid 渲染验证失败: ${JSON.stringify(result)}`)
   }
   if (result.localImage !== 1) throw new Error(`打包版本地图片显示失败: ${JSON.stringify(result)}`)
+  await page.getByRole('heading', { name: '打包版验证' }).click()
+  await page.keyboard.press('End')
+  await app.evaluate(({ BrowserWindow, clipboard, nativeImage }, data) => {
+    clipboard.writeImage(nativeImage.createFromBuffer(Buffer.from(data, 'base64')))
+    BrowserWindow.getAllWindows()[0].webContents.paste()
+  }, SAMPLE_PNG)
+  const pastedImages = await page.waitForFunction(() => {
+    const images = [...document.querySelectorAll('.ProseMirror img:not(.ProseMirror-separator)')]
+    return images.length === 2 && images.every((image) => image.complete && image.naturalWidth > 0)
+      && images.map((image) => image.getAttribute('src'))
+  }, null, { timeout: 15_000 }).then((handle) => handle.jsonValue()).catch(() => [])
+  if (!pastedImages.some((src) => src.includes('pasted-images'))) {
+    throw new Error(`打包版粘贴图片失败: ${JSON.stringify(pastedImages)}`)
+  }
   if (policyViolations.length) throw new Error(`打包版违反内容安全策略: ${policyViolations.join(' | ')}`)
   const menuLabels = (name) => app.evaluate(({ Menu }, menu) => Menu.getApplicationMenu()?.items
     .find((item) => item.label.includes(menu))?.submenu?.items.map((item) => item.label) ?? [], name)
@@ -100,7 +114,8 @@ try {
     throw new Error(`打包版更新模块异常: ${JSON.stringify(updater)}`)
   }
   console.log(JSON.stringify({
-    executablePath, ...result, mermaidText: undefined, updateFeed: `github:${owner}/${repo}`, helpMenu, workspace: true, updater,
+    executablePath, ...result, mermaidText: undefined, pastedImage: true, updateFeed: `github:${owner}/${repo}`,
+    helpMenu, workspace: true, updater,
   }))
 } finally {
   await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)

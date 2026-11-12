@@ -131,9 +131,28 @@ Inkdown 按 Typora 的规则解析图片路径，打开 Typora 写的文档无�
 - 绝对路径（如 Typora 默认的 `C:\Users\…\typora-user-images\image-20240101.png`）、`file:///` 链接和 UNC 路径直接读取。
 - 路径中的空格可以写成 `%20`，或用尖括号包住整个路径：`![截图](<assets/my image.png>)`。
 - Typora 缩放图片后保存的 `<img src="…" style="zoom:50%;" />` 按比例显示，`<center>` 或 `align` 居中同样生效。
-- 把图片文件拖进编辑区会插入它的路径：位于文档所在文件夹内时写相对路径，否则写绝对路径。
 
-未保存的新文档没有所在文件夹，其中的相对路径图片要在保存后才能显示。
+### 粘贴与插入图片
+
+在所见即所得或源码模式中按 Ctrl+V 粘贴截图、复制的图片，或把图片文件拖进编辑区，Inkdown 会把图片保存到文档旁的
+图片文件夹并插入相对路径，和 Typora 的“复制图片到 `./${filename}.assets`”一致：
+
+```text
+笔记/
+├─ 周报.md                 ![image-20261112170405123](周报.assets/image-20261112170405123.png)
+└─ 周报.assets/
+   └─ image-20261112170405123.png
+```
+
+- 截图和从网页“复制图片”得到的图片按时间命名为 `image-年月日时分秒毫秒.png`；磁盘上的图片文件保留原文件名，重名时自动加序号。
+- 文档文件夹内已有的图片直接引用，不会重复复制；文件夹以外的图片会复制一份，移动或分享整个文件夹时图片不会丢失。
+- 从 Word、Excel 或网页复制的图文内容仍按文字粘贴，不会只粘贴成一张截图。
+- 未保存的新文档中粘贴的图片先暂存在应用数据目录，首次保存时自动移入图片文件夹并把链接改为相对路径。
+- 另存到其他文件夹时，原文档引用的相对路径图片会复制到新文档的图片文件夹，链接随之更新；原文件保持不变。
+- “文件 > 图片保存位置”可选择：与文档同名的 `.assets` 文件夹（默认，推荐）、与文档同名的文件夹，或文档所在目录的
+  `assets` 文件夹（同一目录下的文档共用）。
+
+推荐默认的 `.assets` 方案：图片文件夹与文档一一对应、名称不会和同名子文件夹冲突，且 Typora 打开同一文档也能显示这些图片。
 
 ## Mermaid 图表
 
@@ -198,7 +217,7 @@ Electron E2E 会实际启动桌面进程，验证文件打开、所见即所得�
 npm run release
 ```
 
-发布结果位于 `releases/Inkdown-v2.8.2-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
+发布结果位于 `releases/Inkdown-v2.8.3-windows/`，包含 Windows x64 NSIS 安装包、便携 EXE、
 ZIP、在线更新描述文件 `latest.yml` 与差分 blockmap、中文说明、CHANGELOG 和 SHA-256。发布目录不含源码、
 测试缓存或 `node_modules`。发布命令会先执行完整验证与打包版冒烟，成功后删除旧版本和 `release-build` 中间目录。
 软件内“发现新版本”显示的更新内容取自 CHANGELOG 中对应版本的段落，转换为纯文本并按整行控制在 560 字以内
@@ -211,8 +230,8 @@ ZIP、在线更新描述文件 `latest.yml` 与差分 blockmap、中文说明、
 提交发布内容并推送同名版本标签后，上传 Release：
 
 ```powershell
-git tag -a v2.8.2 -m "Inkdown 2.8.2"
-git push origin main v2.8.2
+git tag -a v2.8.3 -m "Inkdown 2.8.3"
+git push origin main v2.8.3
 npm run publish:github
 ```
 

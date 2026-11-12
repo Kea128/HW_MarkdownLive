@@ -218,6 +218,22 @@ describe('Inkdown 桌面编辑器', () => {
     await waitFor(() => expect(window.inkdown.document.openPath).toHaveBeenCalledWith('C:\\测试\\文档.md'))
   })
 
+  it('源码模式粘贴截图时保存图片并插入 Markdown 链接', async () => {
+    vi.mocked(window.inkdown.document.pathForFile).mockReturnValue('')
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    toggleSource()
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 源码' }) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    const image = new File([new Uint8Array([1, 2])], 'image.png', { type: 'image/png' })
+    fireEvent.paste(editor, {
+      clipboardData: { files: [image], items: [{ kind: 'file', type: 'image/png' }], getData: () => '' },
+    })
+    await waitFor(() => expect(editor).toHaveValue('# 初始文稿![image-20261112170000000](初始.assets/image-20261112170000000.png)'))
+    expect(window.inkdown.images.save).toHaveBeenCalledWith({ name: 'image.png', type: 'image/png', data: new Uint8Array([1, 2]) })
+    expect(screen.getByText('图片已保存到 初始.assets/image-20261112170000000.png')).toBeInTheDocument()
+  })
+
   it('拖入图片交给编辑器插入，不当作文档打开', async () => {
     render(<App />)
     await screen.findByRole('heading', { name: '初始文稿' })

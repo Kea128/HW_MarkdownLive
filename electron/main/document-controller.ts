@@ -6,6 +6,11 @@ import { FileService } from './file-service'
 import { decisionFromDialog } from './unsaved-decision'
 import { isDocumentContent, isDocumentPath } from './validators'
 
+export type ImageRelocator = (content: string, from: string | null, to: string) =>
+  Promise<{ content: string; commit(): Promise<void> }>
+
+const keepImages: ImageRelocator = async (content) => ({ content, commit: async () => undefined })
+
 export class DocumentController {
   private snapshot: DocumentSnapshot = {
     content: '',
@@ -22,6 +27,7 @@ export class DocumentController {
     private readonly draftPath: string,
     private readonly onUpdated: (snapshot: DocumentSnapshot) => void,
     private readonly onRecent: (filePath: string) => void,
+    private readonly relocateImages: ImageRelocator = keepImages,
   ) {}
 
   current(): DocumentSnapshot {
@@ -130,14 +136,17 @@ export class DocumentController {
       target = result.filePath
     }
     try {
-      this.modifiedAt = await this.files.write(target, this.snapshot.content)
+      const images = await this.relocateImages(this.snapshot.content, this.snapshot.filePath, target)
+      this.modifiedAt = await this.files.write(target, images.content)
       this.snapshot = {
         ...this.snapshot,
+        content: images.content,
         filePath: target,
         fileName: this.files.displayName(target),
         dirty: false,
         recovered: false,
       }
+      await images.commit()
       await this.removeDraft()
       this.onRecent(target)
       this.publish()

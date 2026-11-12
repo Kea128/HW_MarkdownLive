@@ -22,6 +22,7 @@ export const IPC = {
   feedbackSubmit: 'feedback:submit',
   feedbackOpenFolder: 'feedback:open-folder',
   feedbackShow: 'feedback:show',
+  imageSave: 'image:save',
 } as const
 
 export type ViewMode = 'visual' | 'source' | 'toggle'
@@ -61,6 +62,19 @@ export interface FeedbackInput {
 
 export type FeedbackResult =
   | { ok: true; id: string; tags: string[]; truncated: boolean }
+  | { ok: false; error: string }
+
+export type ImageFolderMode = 'document-assets' | 'document-name' | 'shared-assets'
+
+export interface ImageInput {
+  name: string
+  type: string
+  data?: Uint8Array
+  sourcePath?: string
+}
+
+export type ImageSaveResult =
+  | { ok: true; src: string; location: 'saved' | 'linked' | 'staged' }
   | { ok: false; error: string }
 
 export interface DocumentSnapshot {
@@ -113,5 +127,8 @@ export interface InkdownApi {
     submit(input: FeedbackInput, channel: FeedbackChannel): Promise<FeedbackResult>
     openFolder(): Promise<void>
     onShow(listener: () => void): () => void
+  }
+  images: {
+    save(input: ImageInput): Promise<ImageSaveResult>
   }
 }
