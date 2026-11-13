@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { decodeUtf8, FileService, UTF8_BOM } from '../electron/main/file-service'
+import { decodeUtf8, detectFormat, FileService, UTF8_BOM } from '../electron/main/file-service'
 import { isDocumentContent, isDocumentPath, isSafeExternalUrl } from '../electron/main/validators'
 import { restoreBounds } from '../electron/main/window-state'
 import { decisionFromDialog } from '../electron/main/unsaved-decision'
@@ -24,6 +24,22 @@ describe('桌面文件服务与边界验证', () => {
     await service.write(filePath, '# 已保存')
     expect(await readFile(filePath, 'utf8')).toBe('# 已保存')
     expect(decodeUtf8(Buffer.from(`${UTF8_BOM}正文`))).toBe('正文')
+  })
+
+  it('保存时保留原文件的 CRLF 换行和 BOM，编辑器内统一使用 LF', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), '换行-'))
+    temporaryDirectories.push(directory)
+    const filePath = path.join(directory, 'windows.md')
+    await writeFile(filePath, `${UTF8_BOM}# 标题\r\n\r\n正文\r\n`, 'utf8')
+    const service = new FileService()
+    const loaded = await service.read(filePath)
+    expect(loaded.content).toBe('# 标题\n\n正文\n')
+    expect(loaded.format).toEqual({ bom: true, eol: '\r\n' })
+    await service.write(filePath, '# 标题\n\n修改后的正文\n', loaded.format)
+    expect(await readFile(filePath, 'utf8')).toBe(`${UTF8_BOM}# 标题\r\n\r\n修改后的正文\r\n`)
+    await service.write(filePath, '一行\r\n两行')
+    expect(await readFile(filePath, 'utf8')).toBe('一行\n两行')
+    expect(detectFormat('a\nb\r\nc\n')).toEqual({ bom: false, eol: '\n' })
   })
 
   it('拒绝不受支持路径、过大内容和危险外链协议', () => {

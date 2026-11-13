@@ -18,7 +18,13 @@ vi.mock('@milkdown/kit/utils', () => ({
 }))
 
 vi.mock('../src/editor-images', () => ({
+  IMAGE_MENU_ICON: '<svg></svg>',
+  insertImages: vi.fn(),
   installImagePlugins: vi.fn(),
+}))
+
+vi.mock('../src/editor-breaks', () => ({
+  keepInlineBreaks: vi.fn(),
 }))
 
 vi.mock('../src/mermaid-preview', () => ({
@@ -37,7 +43,7 @@ vi.mock('@milkdown/crepe', () => {
       BlockEdit: 'BlockEdit',
       ImageBlock: 'ImageBlock',
     }
-    editor = { action: crepeState.action }
+    editor = { action: crepeState.action, config: vi.fn(), remove: vi.fn(async () => undefined), use: vi.fn() }
     private root: HTMLElement
 
     constructor(options: {
@@ -151,7 +157,7 @@ describe('WysiwygEditor 生命周期', () => {
     expect(codeMirror.renderPreview('Mermaid', '   ', apply)).toBeNull()
     expect(codeMirror.renderPreview('Mermaid', 'flowchart LR\n  A --> B', apply)).toBeUndefined()
     expect(renderMermaidPreview).toHaveBeenCalledWith('flowchart LR\n  A --> B', apply)
-    expect(codeMirror.languages.at(-1)?.name).toBe('mermaid')
+    expect(codeMirror.languages.map(({ name }) => name)).toEqual(expect.arrayContaining(['mermaid', 'frontmatter']))
     expect(codeMirror.languages.some(({ name }) => name === 'TypeScript')).toBe(true)
     expect([codeMirror.copyText, codeMirror.previewToggleText(true), codeMirror.previewToggleText(false)])
       .toEqual(['复制', '编辑', '隐藏'])

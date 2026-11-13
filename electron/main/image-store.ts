@@ -1,7 +1,8 @@
 import { constants } from 'node:fs'
 import { copyFile, mkdir, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { ImageFolderMode, ImageSaveResult } from '../../src/contracts'
+import type { ImageFolderSetting, ImageSaveResult } from '../../src/contracts'
+import { expandFolderTemplate, folderTemplate } from '../../src/image-folder'
 import { isImagePath } from '../../src/image-source'
 import { isInsideWorkspace } from './workspace'
 
@@ -19,16 +20,9 @@ const GENERIC_NAME = /^(?:image|img|clipboard|screenshot|untitled|blob|图片|�
 const MARKDOWN_IMAGE = /(!\[[^\]\n]*\]\(\s*)(<[^>\n]+>|[^)\s]+)/g
 const HTML_IMAGE = /(<img\b[^>]*?\bsrc\s*=\s*)("[^"]*"|'[^']*')/gi
 
-export const IMAGE_FOLDER_MODES: ImageFolderMode[] = ['document-assets', 'document-name', 'shared-assets']
-
-export function isImageFolderMode(value: unknown): value is ImageFolderMode {
-  return IMAGE_FOLDER_MODES.includes(value as ImageFolderMode)
-}
-
-export function imageFolder(documentPath: string, mode: ImageFolderMode): string {
+export function imageFolder(documentPath: string, setting: ImageFolderSetting): string {
   const base = path.basename(documentPath, path.extname(documentPath))
-  const name = mode === 'shared-assets' ? 'assets' : mode === 'document-name' ? base : `${base}.assets`
-  return path.join(path.dirname(documentPath), name)
+  return path.resolve(path.dirname(documentPath), expandFolderTemplate(folderTemplate(setting), base))
 }
 
 export function imageTimestamp(date: Date): string {
@@ -74,7 +68,7 @@ async function isImageFile(filePath: string): Promise<boolean> {
 export interface SaveImageOptions {
   documentPath: string | null
   stagingDir: string
-  mode: ImageFolderMode
+  folder: ImageFolderSetting
   now?: Date
 }
 
@@ -82,9 +76,9 @@ export interface SaveImageOptions {
 export async function saveImage(input: unknown, options: SaveImageOptions): Promise<ImageSaveResult> {
   if (!input || typeof input !== 'object') return { ok: false, error: '图片数据无效' }
   const { name, type, data, sourcePath } = input as Record<string, unknown>
-  const { documentPath, stagingDir, mode, now = new Date() } = options
+  const { documentPath, stagingDir, now = new Date() } = options
   const documentFolder = documentPath ? path.dirname(documentPath) : null
-  const folder = documentPath ? imageFolder(documentPath, mode) : stagingDir
+  const folder = documentPath ? imageFolder(documentPath, options.folder) : stagingDir
   const result = (target: string, linked = false): ImageSaveResult => ({
     ok: true,
     src: documentFolder ? markdownLink(documentFolder, target) : forwardSlashes(target),
@@ -121,7 +115,7 @@ export interface RelocateOptions {
   from: string | null
   to: string
   stagingDir: string
-  mode: ImageFolderMode
+  folder: ImageFolderSetting
 }
 
 export interface RelocatedImages {
@@ -165,7 +159,7 @@ export async function relocateImages(content: string, options: RelocateOptions):
     if (links.has(key)) return links.get(key) ?? null
     let link: string | null = null
     if (await isImageFile(source)) {
-      const folder = imageFolder(options.to, options.mode)
+      const folder = imageFolder(options.to, options.folder)
       await mkdir(folder, { recursive: true })
       const extension = path.extname(source)
       const copied = await writeUnique(folder, path.basename(source, extension), extension,

@@ -3,9 +3,15 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  imageFolder, imageTimestamp, isImageFolderMode, relocateImages, removeStagedImages, sanitizeFileName, saveImage,
+  imageFolder, imageTimestamp, relocateImages, removeStagedImages, sanitizeFileName, saveImage,
 } from '../electron/main/image-store'
 import { SettingsStore } from '../electron/main/settings-store'
+import type { ImageFolderSetting } from '../src/contracts'
+import { isImageFolderSetting, validateFolderTemplate } from '../src/image-folder'
+
+const assetsFolder: ImageFolderSetting = { mode: 'document-assets', template: '${filename}.assets' }
+const nameFolder: ImageFolderSetting = { mode: 'document-name', template: '${filename}' }
+const sharedFolder: ImageFolderSetting = { mode: 'shared-assets', template: 'assets' }
 
 const directories: string[] = []
 const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
@@ -26,11 +32,25 @@ async function workspace() {
 describe('图片文件夹与命名', () => {
   it('按设置生成文档同名 .assets、同名文件夹或共享 assets 文件夹', () => {
     const document = path.resolve('笔记', '周报.md')
-    expect(imageFolder(document, 'document-assets')).toBe(path.resolve('笔记', '周报.assets'))
-    expect(imageFolder(document, 'document-name')).toBe(path.resolve('笔记', '周报'))
-    expect(imageFolder(document, 'shared-assets')).toBe(path.resolve('笔记', 'assets'))
-    expect(isImageFolderMode('document-assets')).toBe(true)
-    expect(isImageFolderMode('desktop')).toBe(false)
+    expect(imageFolder(document, assetsFolder)).toBe(path.resolve('笔记', '周报.assets'))
+    expect(imageFolder(document, nameFolder)).toBe(path.resolve('笔记', '周报'))
+    expect(imageFolder(document, sharedFolder)).toBe(path.resolve('笔记', 'assets'))
+    expect(imageFolder(document, { mode: 'custom', template: 'images/${filename}' })).toBe(path.resolve('笔记', 'images', '周报'))
+    expect(imageFolder(document, { mode: 'custom', template: '../共享图片' })).toBe(path.resolve('共享图片'))
+    expect(imageFolder(document, { mode: 'custom', template: 'D:\\图片库\\${filename}' })).toBe(path.resolve('D:\\图片库\\周报'))
+  })
+
+  it('校验自定义图片文件夹', () => {
+    expect(validateFolderTemplate('images/${filename}')).toBeNull()
+    expect(validateFolderTemplate('D:\\图片\\${filename}')).toBeNull()
+    expect(validateFolderTemplate('../共享')).toBeNull()
+    expect(validateFolderTemplate('   ')).toBe('请填写图片文件夹')
+    expect(validateFolderTemplate('a|b')).toContain('不能包含')
+    expect(validateFolderTemplate('images:2')).toContain('冒号')
+    expect(validateFolderTemplate('images./x')).toContain('不能以空格或句点结尾')
+    expect(isImageFolderSetting(assetsFolder)).toBe(true)
+    expect(isImageFolderSetting({ mode: 'custom', template: 'a?b' })).toBe(false)
+    expect(isImageFolderSetting({ mode: 'desktop', template: '' })).toBe(false)
   })
 
   it('使用与 Typora 相同的时间戳文件名并清理非法字符', () => {
@@ -43,19 +63,19 @@ describe('图片文件夹与命名', () => {
 describe('保存粘贴与拖入的图片', () => {
   it('剪贴板图片写入文档同名 .assets 文件夹，重名时自动编号', async () => {
     const { notes, document, staging } = await workspace()
-    const options = { documentPath: document, stagingDir: staging, mode: 'document-assets' as const, now }
+    const options = { documentPath: document, stagingDir: staging, folder: assetsFolder, now }
     const first = await saveImage({ name: 'image.png', type: 'image/png', data: png }, options)
     const second = await saveImage({ name: 'image.png', type: 'image/png', data: png }, options)
     expect(first).toEqual({ ok: true, src: '周报 1.assets/image-20261112170405123.png', location: 'saved' })
     expect(second).toEqual({ ok: true, src: '周报 1.assets/image-20261112170405123-1.png', location: 'saved' })
     expect(await readFile(path.join(notes, '周报 1.assets', 'image-20261112170405123.png'))).toEqual(Buffer.from(png))
-    const named = await saveImage({ name: '架构图.jpeg', type: 'image/jpeg', data: png }, { ...options, mode: 'document-name' })
+    const named = await saveImage({ name: '架构图.jpeg', type: 'image/jpeg', data: png }, { ...options, folder: nameFolder })
     expect(named).toMatchObject({ ok: true, src: '周报 1/架构图.jpg' })
   })
 
   it('文档文件夹内的图片直接引用，外部图片复制进图片文件夹', async () => {
     const { root, notes, document, staging } = await workspace()
-    const options = { documentPath: document, stagingDir: staging, mode: 'document-assets' as const, now }
+    const options = { documentPath: document, stagingDir: staging, folder: assetsFolder, now }
     await mkdir(path.join(notes, 'img'), { recursive: true })
     await writeFile(path.join(notes, 'img', '已有.png'), png)
     expect(await saveImage({ name: '已有.png', type: 'image/png', sourcePath: path.join(notes, 'img', '已有.png') }, options))
@@ -69,7 +89,7 @@ describe('保存粘贴与拖入的图片', () => {
   it('未保存的文档先把图片暂存起来，并返回绝对路径', async () => {
     const { staging } = await workspace()
     const result = await saveImage({ name: 'image.png', type: 'image/png', data: png }, {
-      documentPath: null, stagingDir: staging, mode: 'document-assets', now,
+      documentPath: null, stagingDir: staging, folder: assetsFolder, now,
     })
     expect(result).toEqual({
       ok: true, src: `${staging.split(path.sep).join('/')}/image-20261112170405123.png`, location: 'staged',
@@ -78,7 +98,7 @@ describe('保存粘贴与拖入的图片', () => {
 
   it('拒绝非图片、空数据和不存在的文件', async () => {
     const { root, document, staging } = await workspace()
-    const options = { documentPath: document, stagingDir: staging, mode: 'document-assets' as const }
+    const options = { documentPath: document, stagingDir: staging, folder: assetsFolder }
     expect(await saveImage(null, options)).toEqual({ ok: false, error: '图片数据无效' })
     expect(await saveImage({ name: 'a.exe', type: 'application/x-msdownload', data: png }, options))
       .toEqual({ ok: false, error: '不支持的图片格式' })
@@ -98,7 +118,7 @@ describe('保存文档时整理图片', () => {
     await writeFile(path.join(staging, 'image-1.png'), png)
     const stagedLink = `${staging.split(path.sep).join('/')}/image-1.png`
     const content = `# 草稿\n\n![image-1](<${stagedLink}>)\n\n<img src="${stagedLink}" style="zoom:50%">\n\n![远程](https://example.com/a.png)`
-    const result = await relocateImages(content, { from: null, to: document, stagingDir: staging, mode: 'document-assets' })
+    const result = await relocateImages(content, { from: null, to: document, stagingDir: staging, folder: assetsFolder })
     expect(result.content).toBe('# 草稿\n\n![image-1](<周报 1.assets/image-1.png>)\n\n<img src="周报 1.assets/image-1.png" style="zoom:50%">'
       + '\n\n![远程](https://example.com/a.png)')
     expect(result.staged).toEqual([path.join(staging, 'image-1.png')])
@@ -113,11 +133,11 @@ describe('保存文档时整理图片', () => {
     await writeFile(path.join(notes, '周报 1.assets', 'a.png'), png)
     const content = '![a](<周报 1.assets/a.png>)\n![缺失](missing.png)\n![绝对](C:/不存在/b.png)'
     const sameFolder = await relocateImages(content, {
-      from: document, to: path.join(notes, '改名.md'), stagingDir: staging, mode: 'document-assets',
+      from: document, to: path.join(notes, '改名.md'), stagingDir: staging, folder: assetsFolder,
     })
     expect(sameFolder.content).toBe(content)
     const target = path.join(root, '归档', '周报.md')
-    const moved = await relocateImages(content, { from: document, to: target, stagingDir: staging, mode: 'document-assets' })
+    const moved = await relocateImages(content, { from: document, to: target, stagingDir: staging, folder: assetsFolder })
     expect(moved.content).toBe('![a](周报.assets/a.png)\n![缺失](missing.png)\n![绝对](C:/不存在/b.png)')
     expect(moved.staged).toEqual([])
     expect(await readdir(path.join(root, '归档', '周报.assets'))).toEqual(['a.png'])
@@ -129,9 +149,11 @@ describe('保存文档时整理图片', () => {
     const file = path.join(root, 'settings.json')
     const store = new SettingsStore(file)
     await store.load()
-    await store.update({ imageFolder: 'shared-assets' })
-    expect((await new SettingsStore(file).load()).imageFolder).toBe('shared-assets')
-    await writeFile(file, JSON.stringify({ recentFiles: [], imageFolder: 'desktop' }), 'utf8')
+    await store.update({ imageFolder: { mode: 'custom', template: ' images/${filename} ' } })
+    expect((await new SettingsStore(file).load()).imageFolder).toEqual({ mode: 'custom', template: 'images/${filename}' })
+    await writeFile(file, JSON.stringify({ recentFiles: [], imageFolder: 'document-name' }), 'utf8')
+    expect((await new SettingsStore(file).load()).imageFolder).toEqual(nameFolder)
+    await writeFile(file, JSON.stringify({ recentFiles: [], imageFolder: { mode: 'custom', template: 'a|b' } }), 'utf8')
     expect((await new SettingsStore(file).load()).imageFolder).toBeUndefined()
   })
 })

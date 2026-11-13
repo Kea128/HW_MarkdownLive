@@ -1,22 +1,26 @@
 import {
-  lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState,
+  lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState,
   type CSSProperties, type DragEvent, type KeyboardEvent,
 } from 'react'
 import {
   Bold, Braces, CheckSquare, Code2, Eye, FilePlus2, FolderOpen, FolderTree,
   Image, Italic, Link, List, ListOrdered, MessageSquarePlus, Minus, Moon, PanelLeftClose, PanelLeftOpen,
-  Quote, Save, SaveAll, Sigma, Strikethrough, Sun, Table2, Text, Workflow,
+  Quote, Save, SaveAll, Settings, Sigma, Strikethrough, Sun, Table2, Text, Workflow,
 } from 'lucide-react'
 import { createEquationLabel, getEquationDefinitions } from './equations'
 import { FeedbackDialog } from './FeedbackDialog'
 import { useDesktopDocument } from './hooks/useDesktopDocument'
 import { useSourceEditorActions } from './hooks/useSourceEditorActions'
 import { useWorkspace } from './hooks/useWorkspace'
-import { draggingImages, imageFiles, imageMarkdown, shouldPasteImages, storeImages } from './paste-images'
+import {
+  chooseImages, draggingImages, imageFiles, imageMarkdown, shouldPasteImages, storeImages, type StoredImage,
+} from './paste-images'
+import { SettingsDialog } from './SettingsDialog'
 import { Sidebar, type OutlineItem, type SidebarView } from './Sidebar'
 import { readSidebarWidth, SIDEBAR_WIDTH } from './sidebar-width'
 import { getDocumentStats, type EditorMode } from './utils'
 import type { Theme, UpdateState } from './contracts'
+import type { EditorApi } from './WysiwygEditor'
 import './App.css'
 
 const WysiwygEditor = lazy(() => import('./WysiwygEditor'))
@@ -57,6 +61,10 @@ function App() {
   const [sidebarView, setSidebarView] = useState<SidebarView>('outline')
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const editorApi = useRef<EditorApi | null>(null)
+  const modeRef = useRef(mode)
+  modeRef.current = mode
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const showNotice = useCallback((message: string) => {
@@ -79,12 +87,12 @@ function App() {
   const [dragging, setDragging] = useState(false)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const lineNumbersRef = useRef<HTMLDivElement>(null)
-  const stats = useMemo(() => getDocumentStats(activeDocument.content), [activeDocument.content])
-  const lines = useMemo(() => activeDocument.content.split('\n'), [activeDocument.content])
-  const equations = useMemo(
-    () => getEquationDefinitions(activeDocument.content),
-    [activeDocument.content],
-  )
+  // Derived panels follow the text a frame later so typing in long documents is not blocked by them.
+  const deferredContent = useDeferredValue(activeDocument.content)
+  const stats = useMemo(() => getDocumentStats(deferredContent), [deferredContent])
+  const lines = useMemo(() => deferredContent.split('\n'), [deferredContent])
+  const lineNumbers = useMemo(() => lines.map((_, index) => index + 1).join('\n'), [lines])
+  const equations = useMemo(() => getEquationDefinitions(deferredContent), [deferredContent])
   const outline = useMemo(() => {
     let offset = 0
     return lines.flatMap((line, index): OutlineItem[] => {
@@ -104,9 +112,14 @@ function App() {
   const insertLiteralRef = useRef(insertLiteral)
   insertLiteralRef.current = insertLiteral
 
-  const insertSourceImages = async (files: File[]) => {
-    const images = await storeImages(files, showNotice)
+  const insertSourceMarkdown = (images: StoredImage[]) => {
     if (images.length) insertLiteralRef.current(images.map(imageMarkdown).join('\n'))
+  }
+  const insertSourceImages = async (files: File[]) => insertSourceMarkdown(await storeImages(files, showNotice))
+  const insertImageRef = useRef(() => {})
+  insertImageRef.current = () => {
+    if (modeRef.current === 'source') void chooseImages(showNotice).then(insertSourceMarkdown)
+    else editorApi.current?.insertImages()
   }
 
   useEffect(() => {
@@ -146,6 +159,7 @@ function App() {
 
   useEffect(() => window.inkdown.updates.onState(setUpdateState), [])
   useEffect(() => window.inkdown.feedback.onShow(() => setFeedbackOpen(true)), [])
+  useEffect(() => window.inkdown.settings.onShow(() => setSettingsOpen(true)), [])
 
   const changeSidebarWidth = (width: number) => {
     setSidebarWidth(width)
@@ -199,6 +213,7 @@ function App() {
     else if (command.action === 'openPath') void openPath(command.filePath)
     else if (command.action === 'save') void saveDocument()
     else if (command.action === 'saveAs') void saveAsDocument()
+    else if (command.action === 'insertImage') insertImageRef.current()
     else void closeDocument()
   }), [
     closeDocument, newDocument, openDocument, openPath, saveAsDocument, saveDocument,
@@ -266,6 +281,9 @@ function App() {
             }} aria-label="切换明暗主题" title={`当前主题：${theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色'}`}>
             {document.documentElement.dataset.theme === 'dark' ? <Sun /> : <Moon />}
           </button>
+          <button type="button" onClick={() => setSettingsOpen(true)} title="设置 (Ctrl+,)" aria-label="设置">
+            <Settings />
+          </button>
           <button type="button" onClick={() => setFeedbackOpen(true)} title="意见反馈" aria-label="意见反馈">
             <MessageSquarePlus />
           </button>
@@ -330,7 +348,9 @@ function App() {
             title="表格" aria-label="插入表格"><Table2 /></button>
           <span className="separator" />
           <button type="button" onClick={() => applyFormat('[', '](https://)', '链接')} title="链接" aria-label="插入链接"><Link /></button>
-          <button type="button" onClick={() => applyFormat('![', '](https://)', '图片')} title="图片" aria-label="插入图片"><Image /></button>
+          <button type="button" onClick={() => insertImageRef.current()} title="插入图片 (Ctrl+Shift+I)" aria-label="插入图片">
+            <Image />
+          </button>
         </div>
       )}
 
@@ -346,7 +366,7 @@ function App() {
           <section className="editor-pane" aria-label="Markdown 编辑器">
             <div className="editor-shell">
               <div className="line-numbers" ref={lineNumbersRef} aria-hidden="true">
-                <span className="line-number-list">{lines.map((_, index) => index + 1).join('\n')}</span>
+                <span className="line-number-list">{lineNumbers}</span>
                 <span className="current-line-number" style={{
                   '--line-index': currentLine - 1,
                 } as CSSProperties}>{currentLine}</span>
@@ -376,7 +396,7 @@ function App() {
           <section className="visual-pane" aria-label="Markdown 所见即所得区域">
             <Suspense fallback={<div className="visual-editor-loading" aria-label="正在准备所见即所得编辑器" />}>
               <WysiwygEditor markdown={activeDocument.content} documentPath={activeDocument.filePath}
-                onChange={updateContent} onNotice={showNotice} />
+                onChange={updateContent} onNotice={showNotice} onReady={(api) => { editorApi.current = api }} />
             </Suspense>
           </section>
         )}
@@ -384,6 +404,9 @@ function App() {
 
       {dragging && <div className="drop-overlay">释放以打开文档</div>}
       {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
+      {settingsOpen && (
+        <SettingsDialog documentPath={activeDocument.filePath} onClose={() => setSettingsOpen(false)} onSaved={showNotice} />
+      )}
       <footer className="statusbar" aria-live="polite">
         <div className="status-messages">
           <span>{notice ?? status}</span>

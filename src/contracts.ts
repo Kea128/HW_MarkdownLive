@@ -23,12 +23,19 @@ export const IPC = {
   feedbackOpenFolder: 'feedback:open-folder',
   feedbackShow: 'feedback:show',
   imageSave: 'image:save',
+  imageChoose: 'image:choose',
+  imageOpen: 'image:open',
+  imageReveal: 'image:reveal',
+  imageCopy: 'image:copy',
+  settingsGetImageFolder: 'settings:get-image-folder',
+  settingsSetImageFolder: 'settings:set-image-folder',
+  settingsShow: 'settings:show',
 } as const
 
 export type ViewMode = 'visual' | 'source' | 'toggle'
 export type Theme = 'system' | 'light' | 'dark'
 export type DocumentCommand =
-  | { action: 'new' | 'open' | 'save' | 'saveAs' | 'close' }
+  | { action: 'new' | 'open' | 'save' | 'saveAs' | 'close' | 'insertImage' }
   | { action: 'openPath'; filePath: string }
 export type UpdateState =
   | { phase: 'idle' | 'checking' }
@@ -64,7 +71,13 @@ export type FeedbackResult =
   | { ok: true; id: string; tags: string[]; truncated: boolean }
   | { ok: false; error: string }
 
-export type ImageFolderMode = 'document-assets' | 'document-name' | 'shared-assets'
+export type ImageFolderMode = 'document-assets' | 'document-name' | 'shared-assets' | 'custom'
+
+export interface ImageFolderSetting {
+  mode: ImageFolderMode
+  /** Folder for `custom`, relative to the document or absolute; `${filename}` is the document name. */
+  template: string
+}
 
 export interface ImageInput {
   name: string
@@ -130,5 +143,14 @@ export interface InkdownApi {
   }
   images: {
     save(input: ImageInput): Promise<ImageSaveResult>
+    choose(): Promise<ImageSaveResult[]>
+    open(src: string): Promise<boolean>
+    reveal(src: string): Promise<boolean>
+    copy(src: string): Promise<boolean>
+  }
+  settings: {
+    getImageFolder(): Promise<ImageFolderSetting>
+    setImageFolder(setting: ImageFolderSetting): Promise<{ ok: true } | { ok: false; error: string }>
+    onShow(listener: () => void): () => void
   }
 }

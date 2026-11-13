@@ -40,7 +40,7 @@ export function FeedbackDialog({ onClose }: { onClose(): void }) {
   }, [])
 
   useEffect(() => {
-    if (submitted) dialogRef.current?.querySelector<HTMLElement>('.feedback-actions .primary')?.focus()
+    if (submitted) dialogRef.current?.querySelector<HTMLElement>('.dialog-actions .primary')?.focus()
   }, [submitted])
 
   const submit = async (channel: FeedbackChannel) => {
@@ -83,7 +83,7 @@ export function FeedbackDialog({ onClose }: { onClose(): void }) {
 
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section ref={dialogRef} className="feedback-dialog" role="dialog" aria-modal="true"
+      <section ref={dialogRef} className="app-dialog" role="dialog" aria-modal="true"
         aria-labelledby="feedback-title" onKeyDown={keyDown}>
         <header>
           <h2 id="feedback-title">意见反馈</h2>
@@ -101,14 +101,14 @@ export function FeedbackDialog({ onClose }: { onClose(): void }) {
               </p>
             ) : <p>反馈内容已复制到剪贴板，可以通过邮件或即时通讯发送给开发者。</p>}
             <p className="feedback-hint">本机也保存了一份反馈记录，便于离线汇总。</p>
-            <div className="feedback-actions">
+            <div className="dialog-actions">
               <button type="button" onClick={() => void window.inkdown.feedback.openFolder()}>打开反馈记录</button>
               <button type="button" className="primary" onClick={onClose}>完成</button>
             </div>
           </div>
         ) : (
           <form onSubmit={(event) => { event.preventDefault(); void submit('github') }}>
-            <p className="feedback-intro">
+            <p className="dialog-intro">
               说说你遇到的问题或想要的功能。反馈只包含你填写的内容，不会附带正在编辑的文档。
             </p>
             <div className="feedback-row">
@@ -148,8 +148,8 @@ export function FeedbackDialog({ onClose }: { onClose(): void }) {
                 onChange={(event) => update({ includeEnvironment: event.currentTarget.checked })} />
               附带应用版本和系统信息（帮助定位问题）
             </label>
-            {error && <p className="feedback-error" role="alert">{error}</p>}
-            <div className="feedback-actions">
+            {error && <p className="dialog-error" role="alert">{error}</p>}
+            <div className="dialog-actions">
               <button type="button" disabled={busy} onClick={() => void submit('copy')}
                 title="复制为 Markdown，适合无法访问 GitHub 时发送给开发者">
                 <Copy />复制内容

@@ -1,40 +1,58 @@
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import { LanguageDescription } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { Crepe } from '@milkdown/crepe'
+import { commandsCtx, editorViewCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core'
+import { blockService, type BlockService } from '@milkdown/kit/plugin/block'
+import { clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark'
+import type { EditorView } from '@milkdown/kit/prose/view'
 import { replaceAll } from '@milkdown/kit/utils'
+import { ResponsiveBlockService } from './block-service'
+import { keepInlineBreaks } from './editor-breaks'
 import { prepareEquationMarkdown, restoreEquationMarkdown } from './equations'
-import { installImagePlugins } from './editor-images'
+import { FRONT_MATTER_LANGUAGE, prepareFrontMatter, restoreFrontMatter } from './front-matter'
+import { IMAGE_MENU_ICON, insertImages, installImagePlugins } from './editor-images'
 import { decorateEquationBlocks, hasEquationMutation } from './equation-decoration'
 import { resolveImageSource } from './image-source'
 import { normalizeMathDelimiters } from './markdown'
 import { mermaidLanguage } from './mermaid-language'
 import { isMermaidLanguage, renderMermaidPreview } from './mermaid-preview'
-import { storeImages } from './paste-images'
+import { chooseImages, openImage, storeImages } from './paste-images'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
 import 'katex/dist/katex.min.css'
+
+export interface EditorApi {
+  insertImages(): void
+}
 
 interface Props {
   markdown: string
   documentPath?: string | null
   onChange: (markdown: string) => void
   onNotice?: (message: string) => void
+  onReady?: (api: EditorApi | null) => void
 }
 
 const toEditorMarkdown = (markdown: string) =>
-  prepareEquationMarkdown(normalizeMathDelimiters(markdown))
+  prepareEquationMarkdown(normalizeMathDelimiters(prepareFrontMatter(markdown)))
+const fromEditorMarkdown = (markdown: string) => restoreFrontMatter(restoreEquationMarkdown(markdown))
+const yamlLanguage = languages.find(({ name }) => name === 'YAML')
+const frontMatterLanguage = yamlLanguage
+  && LanguageDescription.of({ name: FRONT_MATTER_LANGUAGE, load: () => yamlLanguage.load() })
 
-export default function WysiwygEditor({ markdown, documentPath = null, onChange, onNotice }: Props) {
+export default function WysiwygEditor({ markdown, documentPath = null, onChange, onNotice, onReady }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<Crepe | null>(null)
   const readyRef = useRef(false)
   const onChangeRef = useRef(onChange)
   const onNoticeRef = useRef(onNotice)
+  const onReadyRef = useRef(onReady)
   const documentPathRef = useRef(documentPath)
   const latestMarkdownRef = useRef(markdown)
   const editorMarkdownRef = useRef(toEditorMarkdown(markdown))
   const suppressedMarkdownRef = useRef<string | null>(
-    restoreEquationMarkdown(editorMarkdownRef.current),
+    fromEditorMarkdown(editorMarkdownRef.current),
   )
   // Milkdown re-serializes loaded Markdown (table padding, escapes, list markers); an untouched
   // document must map back to the file content instead of being reported as an edit.
@@ -43,14 +61,15 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
 
   onChangeRef.current = onChange
   onNoticeRef.current = onNotice
+  onReadyRef.current = onReady
   documentPathRef.current = documentPath
   latestMarkdownRef.current = markdown
 
   const rememberPristine = (crepe: Crepe, source: string) => {
-    pristineRef.current = { source, canonical: restoreEquationMarkdown(crepe.getMarkdown()) }
+    pristineRef.current = { source, canonical: fromEditorMarkdown(crepe.getMarkdown()) }
   }
   const toSourceMarkdown = (editorMarkdown: string) => {
-    const restored = restoreEquationMarkdown(editorMarkdown)
+    const restored = fromEditorMarkdown(editorMarkdown)
     return restored === pristineRef.current?.canonical ? pristineRef.current.source : restored
   }
 
@@ -61,7 +80,7 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
     let disposed = false
     const initialMarkdown = toEditorMarkdown(latestMarkdownRef.current)
     editorMarkdownRef.current = initialMarkdown
-    suppressedMarkdownRef.current = restoreEquationMarkdown(initialMarkdown)
+    suppressedMarkdownRef.current = fromEditorMarkdown(initialMarkdown)
     let decorationFrame: number | null = null
     const decorateEquations = () => {
       if (decorationFrame !== null) cancelAnimationFrame(decorationFrame)
@@ -74,6 +93,8 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
       if (hasEquationMutation(records)) decorateEquations()
     })
     equationObserver.observe(root, { childList: true, subtree: true })
+    const notify = (message: string) => onNoticeRef.current?.(message)
+    const chooseAndInsert = async (view: EditorView) => insertImages(view, await chooseImages(notify))
     const crepe = new Crepe({
       root,
       defaultValue: initialMarkdown,
@@ -92,10 +113,44 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
         },
         [Crepe.Feature.BlockEdit]: {
           blockHandle: { getOffset: () => 6 },
+          textGroup: {
+            label: '文本',
+            text: { label: '正文' },
+            h1: { label: '一级标题' },
+            h2: { label: '二级标题' },
+            h3: { label: '三级标题' },
+            h4: { label: '四级标题' },
+            h5: { label: '五级标题' },
+            h6: { label: '六级标题' },
+            quote: { label: '引用' },
+            divider: { label: '分隔线' },
+          },
+          listGroup: {
+            label: '列表',
+            bulletList: { label: '无序列表' },
+            orderedList: { label: '有序列表' },
+            taskList: { label: '任务列表' },
+          },
+          advancedGroup: {
+            label: '插入',
+            codeBlock: { label: '代码块' },
+            table: { label: '表格' },
+            math: { label: '公式' },
+          },
+          buildMenu: (builder) => {
+            builder.getGroup('advanced').addItem('image', {
+              label: '图片',
+              icon: IMAGE_MENU_ICON,
+              onRun: (ctx) => {
+                ctx.get(commandsCtx).call(clearTextInCurrentBlockCommand.key)
+                void chooseAndInsert(ctx.get(editorViewCtx))
+              },
+            })
+          },
         },
         [Crepe.Feature.CodeMirror]: {
           previewOnlyByDefault: true,
-          languages: [...languages, mermaidLanguage],
+          languages: [...languages, mermaidLanguage, ...(frontMatterLanguage ? [frontMatterLanguage] : [])],
           renderPreview: (language, content, applyPreview) => isMermaidLanguage(language) && content.trim()
             ? renderMermaidPreview(content, applyPreview)
             : null,
@@ -115,9 +170,23 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
         },
       },
     })
+    crepe.editor.config((ctx) => {
+      ctx.set(blockService.key, () => new ResponsiveBlockService() as unknown as BlockService)
+      // Keep Typora's and GitHub's list and rule markers so saving does not rewrite untouched lines.
+      ctx.update(remarkStringifyOptionsCtx, (options) => ({ ...options, bullet: '-' as const, rule: '-' as const }))
+    })
+    keepInlineBreaks(crepe.editor)
     installImagePlugins(crepe.editor, {
       resolve: (source) => resolveImageSource(source, documentPathRef.current),
-      store: (files) => storeImages(files, (message) => onNoticeRef.current?.(message)),
+      store: (files) => storeImages(files, notify),
+      choose: async () => (await chooseImages(notify))[0] ?? null,
+      open: (src) => void openImage(src, notify),
+      reveal: (src) => void window.inkdown.images.reveal(src).then((shown) => {
+        if (!shown) notify('找不到图片文件')
+      }),
+      copy: (src) => void window.inkdown.images.copy(src).then((copied) => {
+        notify(copied ? '图片已复制到剪贴板' : '无法复制这张图片')
+      }),
     })
     crepeRef.current = crepe
     const publishCurrentMarkdown = () => {
@@ -157,17 +226,21 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
 
       const latest = toEditorMarkdown(latestMarkdownRef.current)
       if (latest !== editorMarkdownRef.current) {
-        suppressedMarkdownRef.current = restoreEquationMarkdown(latest)
+        suppressedMarkdownRef.current = fromEditorMarkdown(latest)
         editorMarkdownRef.current = latest
         crepe.editor.action(replaceAll(latest, true))
       }
       rememberPristine(crepe, latestMarkdownRef.current)
+      onReadyRef.current?.({
+        insertImages: () => void chooseAndInsert(crepe.editor.action((ctx) => ctx.get(editorViewCtx))),
+      })
     }).catch(() => {
       if (!disposed) setFailed(true)
     })
 
     return () => {
       disposed = true
+      onReadyRef.current?.(null)
       publishCurrentMarkdown()
       readyRef.current = false
       crepeRef.current = null
@@ -183,7 +256,7 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
     const nextMarkdown = toEditorMarkdown(markdown)
     if (nextMarkdown === editorMarkdownRef.current) return
 
-    suppressedMarkdownRef.current = restoreEquationMarkdown(nextMarkdown)
+    suppressedMarkdownRef.current = fromEditorMarkdown(nextMarkdown)
     editorMarkdownRef.current = nextMarkdown
     crepe.editor.action(replaceAll(nextMarkdown, true))
     rememberPristine(crepe, markdown)

@@ -234,6 +234,51 @@ describe('Inkdown 桌面编辑器', () => {
     expect(screen.getByText('图片已保存到 初始.assets/image-20261112170000000.png')).toBeInTheDocument()
   })
 
+  it('设置中修改图片保存位置，自定义文件夹会先校验', async () => {
+    let showListener: (() => void) | undefined
+    vi.mocked(window.inkdown.settings.onShow).mockImplementation((listener) => {
+      showListener = listener
+      return () => undefined
+    })
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    await userEvent.click(screen.getByRole('button', { name: '设置' }))
+    const dialog = await screen.findByRole('dialog', { name: '设置' })
+    await waitFor(() => expect(within(dialog).getByRole('radio', { name: /与文档同名的 \.assets 文件夹/ })).toBeChecked())
+    expect(within(dialog).getByText('“初始”的图片将保存到文档所在文件夹下的 初始.assets')).toBeInTheDocument()
+
+    await userEvent.click(within(dialog).getByRole('radio', { name: /自定义文件夹/ }))
+    const custom = within(dialog).getByRole('textbox', { name: '自定义图片文件夹' })
+    await userEvent.clear(custom)
+    await userEvent.type(custom, 'img|{{filename}')
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('不能包含')
+    expect(within(dialog).getByRole('button', { name: '保存' })).toBeDisabled()
+    await userEvent.clear(custom)
+    await userEvent.type(custom, 'images/${{filename}')
+    expect(within(dialog).getByText('“初始”的图片将保存到文档所在文件夹下的 images/初始')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(window.inkdown.settings.setImageFolder)
+      .toHaveBeenCalledWith({ mode: 'custom', template: 'images/${filename}' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByText(/已更新图片保存位置/)).toBeInTheDocument()
+
+    act(() => showListener?.())
+    expect(await screen.findByRole('dialog', { name: '设置' })).toBeInTheDocument()
+  })
+
+  it('源码模式插入图片时选择文件并写入相对路径', async () => {
+    vi.mocked(window.inkdown.images.choose).mockResolvedValueOnce([
+      { ok: true, src: '初始.assets/架构图.png', location: 'saved' },
+    ])
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    toggleSource()
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 源码' }) as HTMLTextAreaElement
+    editor.setSelectionRange(editor.value.length, editor.value.length)
+    await userEvent.click(screen.getByRole('button', { name: '插入图片' }))
+    await waitFor(() => expect(editor).toHaveValue('# 初始文稿![架构图](初始.assets/架构图.png)'))
+  })
+
   it('拖入图片交给编辑器插入，不当作文档打开', async () => {
     render(<App />)
     await screen.findByRole('heading', { name: '初始文稿' })

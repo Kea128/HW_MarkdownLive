@@ -10,6 +10,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeImage,
   nativeTheme,
   screen,
   shell,
@@ -18,8 +19,12 @@ import {
   type OpenDialogOptions,
 } from 'electron'
 import {
-  IPC, type FeedbackResult, type ImageFolderMode, type Theme, type UpdateState, type ViewMode, type WorkspaceSnapshot,
+  IPC, type FeedbackResult, type ImageSaveResult, type Theme, type UpdateState, type ViewMode, type WorkspaceSnapshot,
 } from '../../src/contracts'
+import {
+  DEFAULT_IMAGE_FOLDER, IMAGE_FOLDER_PRESETS, isImageFolderSetting, validateFolderTemplate,
+} from '../../src/image-folder'
+import { fromImageUrl, resolveImageSource } from '../../src/image-source'
 import { createFeedbackRecord, feedbackIssueUrl, formatFeedback, validateFeedback } from '../../src/feedback'
 import { DocumentController } from './document-controller'
 import { appendFeedback } from './feedback-store'
@@ -76,12 +81,25 @@ const installKindLabels: Record<InstallKind, string> = {
 }
 const feedbackFile = () => path.join(app.getPath('userData'), 'feedback', 'feedback.jsonl')
 const stagedImages = () => path.join(app.getPath('userData'), 'pasted-images')
-const imageMode = () => settings.get().imageFolder ?? 'document-assets'
-const imageFolderOptions: Array<{ mode: ImageFolderMode; label: string }> = [
-  { mode: 'document-assets', label: '与文档同名的 .assets 文件夹（推荐）' },
-  { mode: 'document-name', label: '与文档同名的文件夹' },
-  { mode: 'shared-assets', label: '文档所在目录的 assets 文件夹' },
-]
+const imageSetting = () => settings.get().imageFolder ?? DEFAULT_IMAGE_FOLDER
+const imageOptions = () => ({ documentPath: documents.current().filePath, stagingDir: stagedImages(), folder: imageSetting() })
+const localImage = (src: unknown) => {
+  if (typeof src !== 'string') return null
+  const filePath = fromImageUrl(resolveImageSource(src, documents.current().filePath))
+  return filePath && existsSync(filePath) ? filePath : null
+}
+
+async function chooseImages(): Promise<ImageSaveResult[]> {
+  const options: OpenDialogOptions = {
+    title: '插入图片',
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'avif', 'ico'] }],
+  }
+  const result = mainWindow ? await dialog.showOpenDialog(mainWindow, options) : await dialog.showOpenDialog(options)
+  if (result.canceled) return []
+  return Promise.all(result.filePaths.map((sourcePath) =>
+    saveImage({ name: path.basename(sourcePath), type: '', sourcePath }, imageOptions())))
+}
 
 function serializeWorkspace<T>(task: () => Promise<T>): Promise<T> {
   const run = workspaceTask.then(task, task)
@@ -213,7 +231,7 @@ async function createWindow(): Promise<void> {
       syncWorkspaceWith(filePath)
     },
     async (content, from, to) => {
-      const images = await relocateImages(content, { from, to, stagingDir: stagedImages(), mode: imageMode() })
+      const images = await relocateImages(content, { from, to, stagingDir: stagedImages(), folder: imageSetting() })
       return { content: images.content, commit: () => removeStagedImages(images.staged) }
     },
   )
@@ -330,9 +348,36 @@ function registerIpc(): void {
   ipcMain.handle(IPC.workspaceOpen, (event) => trustedEvent(event.sender.id) ? chooseWorkspace() : null)
   ipcMain.handle(IPC.workspaceRefresh, (event) => trustedEvent(event.sender.id) ? refreshWorkspace() : null)
   ipcMain.handle(IPC.workspaceClose, (event) => trustedEvent(event.sender.id) ? closeWorkspace() : null)
-  ipcMain.handle(IPC.imageSave, (event, input) => trustedEvent(event.sender.id)
-    ? saveImage(input, { documentPath: documents.current().filePath, stagingDir: stagedImages(), mode: imageMode() })
-    : { ok: false, error: '请求无效' })
+  ipcMain.handle(IPC.imageSave, (event, input) =>
+    trustedEvent(event.sender.id) ? saveImage(input, imageOptions()) : { ok: false, error: '请求无效' })
+  ipcMain.handle(IPC.imageChoose, (event) => trustedEvent(event.sender.id) ? chooseImages() : [])
+  ipcMain.handle(IPC.imageOpen, async (event, src) => {
+    const filePath = trustedEvent(event.sender.id) ? localImage(src) : null
+    return filePath ? (await shell.openPath(filePath)) === '' : false
+  })
+  ipcMain.handle(IPC.imageReveal, (event, src) => {
+    const filePath = trustedEvent(event.sender.id) ? localImage(src) : null
+    if (filePath) shell.showItemInFolder(filePath)
+    return Boolean(filePath)
+  })
+  ipcMain.handle(IPC.imageCopy, (event, src) => {
+    const filePath = trustedEvent(event.sender.id) ? localImage(src) : null
+    const image = filePath ? nativeImage.createFromPath(filePath) : null
+    if (!image || image.isEmpty()) return false
+    clipboard.writeImage(image)
+    return true
+  })
+  ipcMain.handle(IPC.settingsGetImageFolder, (event) => trustedEvent(event.sender.id) ? imageSetting() : DEFAULT_IMAGE_FOLDER)
+  ipcMain.handle(IPC.settingsSetImageFolder, async (event, value) => {
+    if (!trustedEvent(event.sender.id)) return { ok: false, error: '请求无效' }
+    if (!isImageFolderSetting(value)) {
+      const template = (value as { template?: unknown } | null)?.template
+      return { ok: false, error: (typeof template === 'string' && validateFolderTemplate(template)) || '图片文件夹设置无效' }
+    }
+    await settings.update({ imageFolder: { mode: value.mode, template: value.template.trim() } })
+    buildMenu()
+    return { ok: true }
+  })
   ipcMain.handle(IPC.feedbackSubmit, (event, input, channel) =>
     trustedEvent(event.sender.id) ? submitFeedback(input, channel) : { ok: false, error: '请求无效' })
   ipcMain.handle(IPC.feedbackOpenFolder, async (event) => {
@@ -379,13 +424,25 @@ function buildMenu(): void {
         { type: 'separator' },
         {
           label: '图片保存位置',
-          submenu: imageFolderOptions.map(({ mode, label }): MenuItemConstructorOptions => ({
-            label,
-            type: 'radio',
-            checked: imageMode() === mode,
-            click: () => void settings.update({ imageFolder: mode }).then(() => buildMenu()),
-          })),
+          submenu: [
+            ...IMAGE_FOLDER_PRESETS.map(({ mode, template, label }): MenuItemConstructorOptions => ({
+              label,
+              type: 'radio',
+              checked: imageSetting().mode === mode,
+              click: () => void settings.update({ imageFolder: { mode, template } }).then(() => buildMenu()),
+            })),
+            {
+              label: '自定义…',
+              type: 'radio',
+              checked: imageSetting().mode === 'custom',
+              click: () => {
+                buildMenu()
+                send(IPC.settingsShow)
+              },
+            },
+          ],
         },
+        { label: '设置…', accelerator: 'Ctrl+,', click: () => send(IPC.settingsShow) },
         { type: 'separator' },
         { label: '退出', accelerator: 'Alt+F4', click: () => mainWindow?.close() },
       ],
@@ -396,6 +453,12 @@ function buildMenu(): void {
         { role: 'undo', label: '撤销' }, { role: 'redo', label: '重做' }, { type: 'separator' },
         { role: 'cut', label: '剪切' }, { role: 'copy', label: '复制' }, { role: 'paste', label: '粘贴' },
         { role: 'selectAll', label: '全选' },
+        { type: 'separator' },
+        {
+          label: '插入图片…',
+          accelerator: 'Ctrl+Shift+I',
+          click: () => send(IPC.documentCommand, { action: 'insertImage' }),
+        },
       ],
     },
     {

@@ -465,8 +465,8 @@ test('Typora 文档的本地图片与缩放图片正常显示，编辑后保留�
     await expect.poll(() => images.evaluateAll((elements) => elements.map((image) => (image as HTMLImageElement).naturalWidth)))
       .toEqual([40, 50, 40, 200, 30, 30])
     await expect(images.nth(0)).toHaveAttribute('alt', '相对路径')
-    const zoomed = page.locator('.html-image img')
-    await expect(zoomed).toHaveAttribute('alt', '缩放')
+    const zoomed = page.locator('.inkdown-image img[alt="缩放"]')
+    await expect(zoomed).toHaveCount(1)
     await expect(zoomed).toHaveCSS('zoom', '0.5')
     await expect(page.locator('.ProseMirror')).not.toContainText('<img')
     await page.waitForTimeout(600)
@@ -567,6 +567,168 @@ test('Ctrl+V 粘贴截图保存到文档同名 .assets 文件夹，未保存文�
     expect(await readdir(staging)).toEqual([])
     await expect(page.locator('.title-area')).toContainText('新文档.md')
     await expect.poll(() => images.first().evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(40)
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
+test('图片可对齐、拖动调整大小和修改说明；块手柄即时跟随；保留 CRLF 与 <br>', async () => {
+  test.setTimeout(90_000)
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-image-edit-'))
+  const folder = path.join(directory, '笔记')
+  await mkdir(path.join(folder, '周报.assets'), { recursive: true })
+  await writeFile(path.join(folder, '周报.assets', 'chart.png'), png(640, 300, [60, 120, 200]))
+  const extra = path.join(directory, '素材.png')
+  await writeFile(extra, png(80, 40, [200, 120, 60]))
+  const filePath = path.join(folder, '周报.md')
+  await writeFile(filePath, [
+    '# 周报', '', '第一段正文。', '', '第二段正文。', '', '段落一<br>段落二', '',
+    '![chart](周报.assets/chart.png)', '', '| 列一 | 列二 |', '| --- | --- |', '| 第一行<br>换行 | 值 |', '',
+  ].join('\r\n'), 'utf8')
+  const profile = path.join(directory, 'profile')
+  const app = await electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${profile}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  try {
+    const page = await app.firstWindow()
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await page.waitForLoadState('domcontentloaded')
+    await page.evaluate((target) => window.inkdown.document.openPath(target), filePath)
+    await expect(page.getByRole('heading', { name: '周报' })).toBeVisible()
+    await expect(page.locator('.ProseMirror td .html-break br')).toHaveCount(1)
+    await expect(page.locator('.ProseMirror > p .html-break br')).toHaveCount(1)
+    await page.waitForTimeout(500)
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+
+    const paragraphs = page.locator('.ProseMirror > p')
+    const first = (await paragraphs.nth(0).boundingBox())!
+    const second = (await paragraphs.nth(1).boundingBox())!
+    await page.mouse.move(first.x + 40, first.y + first.height / 2)
+    await page.waitForTimeout(300)
+    const started = Date.now()
+    await page.mouse.move(second.x + 40, second.y + second.height / 2, { steps: 3 })
+    await page.waitForFunction((target) => {
+      const handle = document.querySelector<HTMLElement>('.milkdown-block-handle')
+      const box = handle?.getBoundingClientRect()
+      return handle?.dataset.show === 'true' && box !== undefined && Math.abs(box.top + box.height / 2 - target) < 20
+    }, second.y + second.height / 2, { polling: 'raf' })
+    expect(Date.now() - started).toBeLessThan(160)
+    expect(await page.locator('.milkdown-block-handle').evaluate((handle) => getComputedStyle(handle).transitionProperty))
+      .toBe('opacity')
+    await paragraphs.nth(0).click()
+    await page.mouse.move(2, 2)
+    await page.keyboard.press('ArrowDown')
+    await expect(page.locator('.milkdown-block-handle')).toHaveAttribute('data-show', 'true')
+
+    const image = () => page.locator('.inkdown-image').first()
+    await image().locator('img').click()
+    await expect(image().getByRole('toolbar', { name: '图片操作' })).toBeVisible()
+    await image().getByRole('button', { name: '居中' }).click()
+    await image().getByRole('button', { name: '图片大小' }).click()
+    await image().getByRole('menuitemradio', { name: '宽度 50%' }).click()
+    await expect(image()).toHaveAttribute('data-align', 'center')
+    const before = (await image().locator('.inkdown-image-frame').boundingBox())!.width
+    const handle = (await image().locator('.image-handle[data-side="right"]').boundingBox())!
+    await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(handle.x + handle.width / 2 + 50, handle.y + handle.height / 2, { steps: 5 })
+    await expect(image().locator('.image-size')).toContainText('×')
+    await page.mouse.up()
+    await expect.poll(async () => (await image().locator('.inkdown-image-frame').boundingBox())!.width)
+      .toBeGreaterThan(before + 80)
+    await image().locator('img').click()
+    await image().getByRole('button', { name: '图片说明' }).click()
+    await page.keyboard.press('Control+A')
+    await page.keyboard.type('季度趋势图')
+    await page.keyboard.press('Enter')
+    await expect(image().locator('img')).toHaveAttribute('alt', '季度趋势图')
+
+    await page.getByTitle('保存 (Ctrl+S)').click()
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+    const saved = await readFile(filePath, 'utf8')
+    expect(saved).toMatch(/<p align="center"><img src="周报\.assets\/chart\.png" alt="季度趋势图" width="\d+" \/><\/p>/)
+    expect(saved).toContain('段落一<br>段落二')
+    expect(saved).toMatch(/第一行<br>换行/)
+    expect(saved.split('\n').every((line, index, lines) => index === lines.length - 1 || line.endsWith('\r'))).toBe(true)
+
+    await image().locator('img').click()
+    await image().getByRole('button', { name: '图片大小' }).click()
+    await image().getByRole('menuitemradio', { name: '原始大小' }).click()
+    await image().getByRole('button', { name: '左对齐' }).click()
+    await page.keyboard.press('Control+/')
+    await expect(page.getByRole('textbox', { name: 'Markdown 源码' })).toHaveValue(/!\[季度趋势图\]\(周报\.assets\/chart\.png\)/)
+    await page.keyboard.press('Control+/')
+
+    await page.locator('.ProseMirror p').filter({ hasText: '第二段正文' }).click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('/')
+    await expect(page.locator('.milkdown-slash-menu')).toContainText('一级标题')
+    await expect(page.locator('.milkdown-slash-menu')).toContainText('图片')
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Backspace')
+
+    await page.getByRole('button', { name: '设置' }).click()
+    const settings = page.getByRole('dialog', { name: '设置' })
+    await settings.getByRole('radio', { name: /自定义文件夹/ }).check()
+    await settings.getByRole('textbox', { name: '自定义图片文件夹' }).fill('images/${filename}')
+    await expect(settings.locator('.settings-preview')).toContainText('images/周报')
+    await settings.getByRole('button', { name: '保存' }).click()
+    await expect(settings).toHaveCount(0)
+    await app.evaluate(({ dialog }, target) => {
+      dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [target] })) as typeof dialog.showOpenDialog
+    }, extra)
+    await app.evaluate(({ Menu }) => {
+      const edit = Menu.getApplicationMenu()?.items.find((item) => item.label.includes('编辑'))
+      const insert = edit?.submenu?.items.find((item) => item.label === '插入图片…')
+      insert?.click?.(insert, undefined, {} as Electron.KeyboardEvent)
+    })
+    await expect(page.locator('.status-messages')).toContainText('images/周报/素材.png')
+    expect(await readdir(path.join(folder, 'images', '周报'))).toEqual(['素材.png'])
+    await expect(page.locator('.inkdown-image img[alt="素材"]')).toHaveCount(1)
+    expect(errors).toEqual([])
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
+test('编辑保存后保留 front matter、列表与分隔线写法', async () => {
+  test.setTimeout(60_000)
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-front-matter-'))
+  const filePath = path.join(directory, '博客.md')
+  await writeFile(filePath, [
+    '---', 'title: 博客', 'tags: [写作, Markdown]', '---', '', '# 文章', '', '第一段。', '', '- 要点一', '- 要点二', '', '---', '',
+    '结尾。', '',
+  ].join('\n'), 'utf8')
+  const app = await electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${path.join(directory, 'profile')}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  try {
+    const page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await page.evaluate((target) => window.inkdown.document.openPath(target), filePath)
+    await expect(page.getByRole('heading', { name: '文章' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: /title: 博客/ })).toHaveCount(0)
+    await expect(page.locator('.milkdown-code-block').first()).toContainText('title: 博客')
+    await page.locator('.ProseMirror p').filter({ hasText: '第一段' }).click()
+    await page.keyboard.press('End')
+    await page.keyboard.type('已修改')
+    await page.getByTitle('保存 (Ctrl+S)').click()
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+    const saved = await readFile(filePath, 'utf8')
+    expect(saved.startsWith('---\ntitle: 博客\ntags: [写作, Markdown]\n---\n')).toBe(true)
+    expect(saved).toContain('第一段。已修改')
+    expect(saved).toContain('- 要点一\n- 要点二')
+    expect(saved).toMatch(/\n---\n\n结尾。/)
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
     await new Promise((resolve) => setTimeout(resolve, 500))

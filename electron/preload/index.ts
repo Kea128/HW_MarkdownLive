@@ -49,6 +49,15 @@ const api: InkdownApi = {
   },
   images: {
     save: (input) => ipcRenderer.invoke(IPC.imageSave, input),
+    choose: () => ipcRenderer.invoke(IPC.imageChoose),
+    open: (src) => ipcRenderer.invoke(IPC.imageOpen, src),
+    reveal: (src) => ipcRenderer.invoke(IPC.imageReveal, src),
+    copy: (src) => ipcRenderer.invoke(IPC.imageCopy, src),
+  },
+  settings: {
+    getImageFolder: () => ipcRenderer.invoke(IPC.settingsGetImageFolder),
+    setImageFolder: (setting) => ipcRenderer.invoke(IPC.settingsSetImageFolder, setting),
+    onShow: (listener) => subscription<void>(IPC.settingsShow, () => listener()),
   },
 }
 

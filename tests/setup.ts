@@ -59,6 +59,15 @@ Object.defineProperty(window, 'inkdown', {
     },
     images: {
       save: vi.fn(async () => ({ ok: true, src: '初始.assets/image-20261112170000000.png', location: 'saved' })),
+      choose: vi.fn(async () => []),
+      open: vi.fn(async () => true),
+      reveal: vi.fn(async () => true),
+      copy: vi.fn(async () => true),
+    },
+    settings: {
+      getImageFolder: vi.fn(async () => ({ mode: 'document-assets', template: '${filename}.assets' })),
+      setImageFolder: vi.fn(async () => ({ ok: true })),
+      onShow: vi.fn(() => () => undefined),
     },
   },
 })

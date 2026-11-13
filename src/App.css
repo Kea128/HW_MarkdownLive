@@ -934,11 +934,274 @@ button svg {
   max-width: 100%;
 }
 
-.visual-editor .milkdown .ProseMirror :is(.milkdown-image-inline, .html-image) {
+.visual-editor .milkdown .milkdown-block-handle {
+  transition: opacity .12s ease;
+}
+
+.visual-editor .milkdown .ProseMirror .inkdown-image {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  vertical-align: bottom;
+}
+
+.visual-editor .milkdown .ProseMirror .inkdown-image.is-block {
+  display: flex;
+  width: 100%;
+}
+
+.visual-editor .milkdown .ProseMirror .inkdown-image[data-align="center"] {
+  justify-content: center;
+}
+
+.visual-editor .milkdown .ProseMirror .inkdown-image[data-align="right"] {
+  justify-content: flex-end;
+}
+
+.visual-editor .milkdown .ProseMirror .inkdown-image-frame {
+  position: relative;
+  display: inline-block;
   max-width: 100%;
 }
 
-.visual-editor .milkdown .ProseMirror :is(.milkdown-image-inline, .html-image) img {
+.visual-editor .milkdown .ProseMirror .inkdown-image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.visual-editor .milkdown .ProseMirror .inkdown-image.is-selected img {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.visual-editor .milkdown .ProseMirror .image-handle {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  width: 8px;
+  height: 44px;
+  max-height: 70%;
+  transform: translateY(-50%);
+  border: 1px solid var(--surface);
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 1px 4px rgba(15, 20, 28, .25);
+  cursor: ew-resize;
+  opacity: 0;
+  touch-action: none;
+  transition: opacity .12s ease;
+}
+
+.visual-editor .milkdown .ProseMirror .image-handle[data-side="left"] {
+  left: -4px;
+}
+
+.visual-editor .milkdown .ProseMirror .image-handle[data-side="right"] {
+  right: -4px;
+}
+
+.visual-editor .milkdown .ProseMirror :is(.inkdown-image-frame:hover, .is-selected, .is-resizing) .image-handle {
+  opacity: 1;
+}
+
+.visual-editor .milkdown .ProseMirror .is-broken .image-handle {
+  display: none;
+}
+
+.visual-editor .milkdown .ProseMirror .image-size {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #fff;
+  background: rgba(15, 20, 28, .72);
+  font: 12px/1.6 var(--sans);
+}
+
+.visual-editor .milkdown .ProseMirror .is-resizing .image-size {
+  display: block;
+}
+
+.visual-editor .milkdown .ProseMirror .image-toolbar {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  left: 8px;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 18px rgba(15, 20, 28, .16);
+  line-height: normal;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.visual-editor .milkdown .ProseMirror .image-toolbar input {
+  user-select: text;
+}
+
+.visual-editor .milkdown .ProseMirror .is-selected .image-toolbar:not(:empty) {
+  display: flex;
+}
+
+.visual-editor .milkdown .ProseMirror .inkdown-image[data-align="right"] .image-toolbar {
+  right: 8px;
+  left: auto;
+}
+
+.visual-editor .milkdown .ProseMirror .image-toolbar button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--muted);
+}
+
+.visual-editor .milkdown .ProseMirror .image-toolbar button:hover {
+  color: var(--text);
+}
+
+.visual-editor .milkdown .ProseMirror .image-toolbar button[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.visual-editor .milkdown .ProseMirror .image-toolbar button:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+
+.visual-editor .milkdown .ProseMirror .image-toolbar input {
+  width: min(320px, 60vw);
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--editor);
+  font: 12.5px/1 var(--sans);
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-trigger {
+  height: 28px;
+  min-width: 76px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 6px 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font: 12.5px/1 var(--sans);
+  cursor: pointer;
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-trigger:is(:hover, [aria-expanded="true"]) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-trigger:focus-visible,
+.visual-editor .milkdown .ProseMirror .image-size-options > span:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-trigger svg {
+  width: 14px;
+  height: 14px;
+  color: var(--muted);
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-options {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 120px;
+  display: none;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 8px 22px rgba(15, 20, 28, .18);
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-menu.is-open .image-size-options {
+  display: grid;
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-options > span {
+  padding: 6px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  font: 13px/1.4 var(--sans);
+  cursor: pointer;
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-options > span:hover {
+  background: var(--hover);
+}
+
+.visual-editor .milkdown .ProseMirror .image-size-options > [aria-checked="true"] {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.visual-editor .milkdown .ProseMirror .image-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+.visual-editor .milkdown .ProseMirror .image-broken {
+  display: none;
+}
+
+.visual-editor .milkdown .ProseMirror .is-broken img {
+  display: none;
+}
+
+.visual-editor .milkdown .ProseMirror .is-broken .image-broken {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 220px;
+  min-height: 40px;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px dashed color-mix(in srgb, var(--danger) 45%, var(--border));
+  border-radius: 6px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--danger) 5%, transparent);
+  font: 13px/1.5 var(--sans);
+  word-break: break-all;
+}
+
+.visual-editor .milkdown .ProseMirror .is-broken.is-selected .image-toolbar {
+  top: calc(100% + 6px);
+}
+
+.visual-editor .milkdown .ProseMirror .html-image {
+  max-width: 100%;
+}
+
+.visual-editor .milkdown .ProseMirror .html-image img {
   height: auto;
   border-radius: 4px;
   vertical-align: bottom;
@@ -956,7 +1219,12 @@ button svg {
   text-align: right;
 }
 
-.visual-editor .milkdown .ProseMirror :is(.milkdown-image-inline.selected, .html-image.ProseMirror-selectednode) img {
+.visual-editor .milkdown .ProseMirror .html-inline {
+  color: var(--muted);
+  font: .82em/1.5 var(--mono);
+}
+
+.visual-editor .milkdown .ProseMirror :is(.html-image, .html-inline).ProseMirror-selectednode {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -1033,7 +1301,7 @@ button svg {
   background: rgba(15, 20, 28, .38);
 }
 
-.feedback-dialog {
+.app-dialog {
   width: min(560px, 100%);
   max-height: 100%;
   overflow: auto;
@@ -1044,33 +1312,33 @@ button svg {
   box-shadow: 0 18px 48px rgba(15, 20, 28, .28);
 }
 
-.feedback-dialog header {
+.app-dialog header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 16px 18px 0 22px;
 }
 
-.feedback-dialog h2 {
+.app-dialog h2 {
   margin: 0;
   font-size: 17px;
 }
 
-.feedback-dialog .icon {
+.app-dialog .icon {
   width: 30px;
   height: 30px;
   display: grid;
   place-items: center;
 }
 
-.feedback-dialog form,
+.app-dialog form,
 .feedback-done {
   display: grid;
   gap: 12px;
   padding: 10px 22px 20px;
 }
 
-.feedback-intro,
+.dialog-intro,
 .feedback-hint {
   margin: 0;
   color: var(--muted);
@@ -1084,24 +1352,24 @@ button svg {
   gap: 12px;
 }
 
-.feedback-dialog label {
+.app-dialog label {
   display: grid;
   gap: 5px;
   font-size: 12.5px;
   font-weight: 600;
 }
 
-.feedback-dialog label > span {
+.app-dialog label > span {
   display: flex;
   justify-content: space-between;
 }
 
-.feedback-dialog label small {
+.app-dialog label small {
   color: var(--faint);
   font-weight: 400;
 }
 
-.feedback-dialog :is(input:not([type="checkbox"]), select, textarea) {
+.app-dialog :is(input:not([type="checkbox"], [type="radio"]), select, textarea) {
   width: 100%;
   box-sizing: border-box;
   padding: 7px 10px;
@@ -1112,16 +1380,16 @@ button svg {
   font: 13px/1.6 var(--sans);
 }
 
-.feedback-dialog textarea {
+.app-dialog textarea {
   resize: vertical;
 }
 
-.feedback-dialog :is(input, select, textarea):focus-visible {
+.app-dialog :is(input, select, textarea):focus-visible {
   border-color: var(--accent);
   outline: 0;
 }
 
-.feedback-dialog .feedback-check {
+.app-dialog .feedback-check {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1150,20 +1418,20 @@ button svg {
   font-style: normal;
 }
 
-.feedback-error {
+.dialog-error {
   margin: 0;
   color: var(--danger);
   font-size: 12.5px;
 }
 
-.feedback-actions {
+.dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
 }
 
-.feedback-actions button {
+.dialog-actions button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1172,23 +1440,23 @@ button svg {
   font-size: 13px;
 }
 
-.feedback-actions button svg {
+.dialog-actions button svg {
   width: 15px;
   height: 15px;
 }
 
-.feedback-actions .primary {
+.dialog-actions .primary {
   border-color: var(--accent);
   color: white;
   background: var(--accent);
 }
 
-.feedback-actions .primary:hover {
+.dialog-actions .primary:hover {
   color: white;
   background: color-mix(in srgb, var(--accent) 86%, black);
 }
 
-.feedback-actions button:disabled {
+.dialog-actions button:disabled {
   opacity: .6;
   cursor: progress;
 }
@@ -1203,7 +1471,7 @@ button svg {
   margin: 0;
 }
 
-.feedback-done .feedback-actions {
+.feedback-done .dialog-actions {
   justify-self: stretch;
 }
 
@@ -1216,6 +1484,64 @@ button svg {
 .feedback-done-title {
   font-size: 15px;
   font-weight: 650;
+}
+
+.settings-group {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-group legend {
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: 13.5px;
+  font-weight: 650;
+}
+
+.app-dialog .settings-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.app-dialog .settings-option:has(input:checked) {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.app-dialog .settings-option input {
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+}
+
+.app-dialog .settings-option > span {
+  display: grid;
+  gap: 2px;
+}
+
+.app-dialog .settings-option small {
+  color: var(--faint);
+  font: 12px/1.5 var(--sans);
+}
+
+.settings-preview {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--subtle);
+  font-size: 12.5px;
+  line-height: 1.6;
+  word-break: break-all;
 }
 
 @media (max-width: 900px) {

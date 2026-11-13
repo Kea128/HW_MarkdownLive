@@ -7,12 +7,37 @@ interface Options {
   updateContent: (content: string) => void
 }
 
+/** Replaces only the changed span through the browser so Ctrl+Z can undo toolbar edits; assigning `value` clears history. */
+function replaceUndoably(editor: HTMLTextAreaElement, next: string): boolean {
+  if (typeof document.execCommand !== 'function') return false
+  const current = editor.value
+  if (current === next) return true
+  let start = 0
+  while (start < current.length && start < next.length && current[start] === next[start]) start += 1
+  let currentEnd = current.length
+  let nextEnd = next.length
+  while (currentEnd > start && nextEnd > start && current[currentEnd - 1] === next[nextEnd - 1]) {
+    currentEnd -= 1
+    nextEnd -= 1
+  }
+  editor.focus()
+  editor.setSelectionRange(start, currentEnd)
+  const inserted = next.slice(start, nextEnd)
+  const applied = inserted ? document.execCommand('insertText', false, inserted) : document.execCommand('delete')
+  return applied && editor.value === next
+}
+
 export function useSourceEditorActions({ editorRef, content, updateContent }: Options) {
   const applyResult = useCallback((result: {
     value: string
     selectionStart: number
     selectionEnd: number
   }) => {
+    const editor = editorRef.current
+    if (editor && replaceUndoably(editor, result.value)) {
+      editor.setSelectionRange(result.selectionStart, result.selectionEnd)
+      return
+    }
     updateContent(result.value)
     requestAnimationFrame(() => {
       editorRef.current?.focus()

@@ -1,6 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises'
-import type { ImageFolderMode } from '../../src/contracts'
-import { isImageFolderMode } from './image-store'
+import type { ImageFolderSetting } from '../../src/contracts'
+import { IMAGE_FOLDER_PRESETS, isImageFolderSetting } from '../../src/image-folder'
 import type { Bounds } from './window-state'
 import { isDocumentPath } from './validators'
 import { isWorkspaceRoot } from './workspace'
@@ -9,7 +9,13 @@ export interface Settings {
   bounds?: Bounds
   recentFiles: string[]
   workspaceFolder?: string
-  imageFolder?: ImageFolderMode
+  imageFolder?: ImageFolderSetting
+}
+
+function readImageFolder(value: unknown): ImageFolderSetting | undefined {
+  const legacy = IMAGE_FOLDER_PRESETS.find(({ mode }) => mode === value)
+  if (legacy) return { mode: legacy.mode, template: legacy.template }
+  return isImageFolderSetting(value) ? { mode: value.mode, template: value.template.trim() } : undefined
 }
 
 export class SettingsStore {
@@ -26,7 +32,7 @@ export class SettingsStore {
           ? parsed.recentFiles.filter(isDocumentPath).slice(0, 10)
           : [],
         workspaceFolder: isWorkspaceRoot(parsed.workspaceFolder) ? parsed.workspaceFolder : undefined,
-        imageFolder: isImageFolderMode(parsed.imageFolder) ? parsed.imageFolder : undefined,
+        imageFolder: readImageFolder(parsed.imageFolder),
       }
     } catch {
       this.value = { recentFiles: [] }

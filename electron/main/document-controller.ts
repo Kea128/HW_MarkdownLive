@@ -2,7 +2,7 @@ import { unlink, writeFile, readFile } from 'node:fs/promises'
 import type { BrowserWindow } from 'electron'
 import { dialog } from 'electron'
 import type { DocumentSnapshot, OperationResult } from '../../src/contracts'
-import { FileService } from './file-service'
+import { DEFAULT_TEXT_FORMAT, FileService, type TextFormat } from './file-service'
 import { decisionFromDialog } from './unsaved-decision'
 import { isDocumentContent, isDocumentPath } from './validators'
 
@@ -19,6 +19,7 @@ export class DocumentController {
     dirty: false,
   }
   private modifiedAt = 0
+  private format: TextFormat = DEFAULT_TEXT_FORMAT
   private draftTimer?: NodeJS.Timeout
 
   constructor(
@@ -85,6 +86,7 @@ export class DocumentController {
   async newDocument(): Promise<OperationResult> {
     if (!(await this.confirmDiscard())) return { ok: false, canceled: true }
     this.snapshot = { content: '', filePath: null, fileName: '未命名.md', dirty: false }
+    this.format = DEFAULT_TEXT_FORMAT
     await this.removeDraft()
     this.publish()
     return { ok: true }
@@ -108,6 +110,7 @@ export class DocumentController {
     try {
       const loaded = await this.files.read(filePath)
       this.modifiedAt = loaded.modifiedAt
+      this.format = loaded.format
       this.snapshot = {
         content: loaded.content,
         filePath,
@@ -137,7 +140,7 @@ export class DocumentController {
     }
     try {
       const images = await this.relocateImages(this.snapshot.content, this.snapshot.filePath, target)
-      this.modifiedAt = await this.files.write(target, images.content)
+      this.modifiedAt = await this.files.write(target, images.content, this.format)
       this.snapshot = {
         ...this.snapshot,
         content: images.content,
