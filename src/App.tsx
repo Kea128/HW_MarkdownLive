@@ -13,13 +13,16 @@ import { useDesktopDocument } from './hooks/useDesktopDocument'
 import { usePreferences } from './hooks/usePreferences'
 import { useSourceEditorActions } from './hooks/useSourceEditorActions'
 import { useWorkspace } from './hooks/useWorkspace'
+import { markdownOutline, type OutlineItem } from './outline'
 import {
   chooseImages, draggingImages, imageFiles, imageMarkdown, shouldPasteImages, storeImages, type StoredImage,
 } from './paste-images'
-import { offsetAtLine, sourceAnchor, sourceScrollTop, type SourceMetrics, type ViewAnchor } from './position-sync'
+import {
+  lineAtOffset, offsetAtLine, sourceAnchor, sourceScrollTop, type SourceMetrics, type ViewAnchor,
+} from './position-sync'
 import { contentWidthCss, LINE_SPACINGS } from './preferences'
 import { SettingsDialog } from './SettingsDialog'
-import { Sidebar, type OutlineItem, type SidebarView } from './Sidebar'
+import { Sidebar, type SidebarView } from './Sidebar'
 import { readSidebarWidth, SIDEBAR_WIDTH } from './sidebar-width'
 import { getDocumentStats } from './utils'
 import type { EditorMode, LineSpacing, SettingsSection, Theme, UpdateState } from './contracts'
@@ -57,26 +60,12 @@ function sourceMetrics(textarea: HTMLTextAreaElement): SourceMetrics {
   }
 }
 
+const isDark = (theme: Theme) => theme === 'dark' || (theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+const draggingDocuments = (event: DragEvent) =>
+  Array.from(event.dataTransfer.items).some((item) => item.kind === 'file' && !item.type.startsWith('image/'))
+
 function App() {
-  const {
-    document: activeDocument, status, updateContent, newDocument, openDocument,
-    openPath, saveDocument, autoSaveDocument, saveAsDocument, closeDocument,
-  } = useDesktopDocument()
-  const { preferences, loaded: preferencesLoaded, update: updatePreferences } = usePreferences()
-  const [mode, setMode] = useState<EditorMode>('visual')
-  const [theme, setTheme] = useState<Theme>('system')
-  const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' })
-  const updateMessage = describeUpdate(updateState)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [sidebarView, setSidebarView] = useState<SidebarView>('outline')
-  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
-  const [feedbackOpen, setFeedbackOpen] = useState(false)
-  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null)
   const editorApi = useRef<EditorApi | null>(null)
-  const modeRef = useRef(mode)
-  modeRef.current = mode
-  const lastRichMode = useRef<Exclude<EditorMode, 'source'>>('visual')
-  const pendingAnchor = useRef<ViewAnchor | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const showNotice = useCallback((message: string) => {
@@ -84,32 +73,51 @@ function App() {
     setNotice(message)
     noticeTimer.current = setTimeout(() => setNotice(null), 5_000)
   }, [])
+  const {
+    document: activeDocument, status, saveProblem, updateContent, newDocument, openDocument,
+    openPath, saveDocument, autoSaveDocument, saveAsDocument, closeDocument,
+  } = useDesktopDocument({ flushEditor: () => editorApi.current?.flush(), onNotice: showNotice })
+  const { preferences, loaded: preferencesLoaded, update: updatePreferences } = usePreferences()
+  const [mode, setMode] = useState<EditorMode>('visual')
+  const [theme, setTheme] = useState<Theme>('system')
+  const [dark, setDark] = useState(false)
+  const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' })
+  const updateMessage = describeUpdate(updateState)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarView, setSidebarView] = useState<SidebarView>('outline')
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
+  const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null)
+  const dialogOpen = feedbackOpen || settingsSection !== null
+  const dialogOpenRef = useRef(dialogOpen)
+  dialogOpenRef.current = dialogOpen
+  const modeRef = useRef(mode)
+  modeRef.current = mode
+  const lastRichMode = useRef<Exclude<EditorMode, 'source'>>('visual')
+  const pendingAnchor = useRef<ViewAnchor | null>(null)
   const { workspace, openFolder, refreshFolder, closeFolder } = useWorkspace(() => {
     setSidebarOpen(true)
     setSidebarView('files')
   })
   const [currentLine, setCurrentLine] = useState(1)
+  const [composing, setComposing] = useState(false)
   const themeRef = useRef<Theme>('system')
   const [dragging, setDragging] = useState(false)
+  const dragDepth = useRef(0)
   const editorRef = useRef<HTMLTextAreaElement>(null)
   const lineNumbersRef = useRef<HTMLDivElement>(null)
+  const sourceSelection = useRef({ start: 0, end: 0, scrollTop: 0 })
+  const typedContent = useRef<string | null>(null)
+  const lastSourceRender = useRef<{ documentId: number } | null>(null)
+  const tabEscape = useRef(false)
   // Derived panels follow the text a frame later so typing in long documents is not blocked by them.
   const deferredContent = useDeferredValue(activeDocument.content)
   const stats = useMemo(() => getDocumentStats(deferredContent), [deferredContent])
-  const lines = useMemo(() => deferredContent.split('\n'), [deferredContent])
-  const lineNumbers = useMemo(() => lines.map((_, index) => index + 1).join('\n'), [lines])
+  const lineNumbers = useMemo(() => Array.from({ length: stats.lines }, (_, index) => index + 1).join('\n'), [stats.lines])
   const equations = useMemo(() => getEquationDefinitions(deferredContent), [deferredContent])
-  const outline = useMemo(() => {
-    let offset = 0
-    return lines.flatMap((line, index): OutlineItem[] => {
-      const match = /^(#{1,6})\s+(.+?)\s*#*$/.exec(line)
-      const item = match ? [{ level: match[1].length, text: match[2], line: index + 1, offset }] : []
-      offset += line.length + 1
-      return item
-    })
-  }, [lines])
+  const outline = useMemo(() => markdownOutline(deferredContent), [deferredContent])
   const {
-    applyFormat, applyHeading, applyBlockFormat, insertLiteral,
+    applyFormat, applyHeading, applyBlockFormat, applyLinePrefix, indent, insertLiteral,
   } = useSourceEditorActions({
     editorRef,
     content: activeDocument.content,
@@ -124,6 +132,7 @@ function App() {
   const insertSourceImages = async (files: File[]) => insertSourceMarkdown(await storeImages(files, showNotice))
   const insertImageRef = useRef(() => {})
   insertImageRef.current = () => {
+    if (dialogOpenRef.current) return
     if (modeRef.current === 'reading') showNotice('阅读模式下不能编辑，按 Ctrl+1 回到所见即所得后再插入图片')
     else if (modeRef.current === 'source') void chooseImages(showNotice).then(insertSourceMarkdown)
     else editorApi.current?.insertImages()
@@ -132,6 +141,7 @@ function App() {
   const modeChosen = useRef(false)
   // Switching between the source and rendered views keeps the caret line and its place on screen.
   const switchMode = useCallback((requested: EditorMode | 'toggle') => {
+    if (dialogOpenRef.current) return
     modeChosen.current = true
     const current = modeRef.current
     const next = requested === 'toggle' ? (current === 'source' ? lastRichMode.current : 'source') : requested
@@ -141,12 +151,32 @@ function App() {
       pendingAnchor.current = textarea ? sourceAnchor(textarea, sourceMetrics(textarea)) : null
     } else if (next === 'source') {
       editorApi.current?.flush()
-      pendingAnchor.current = editorApi.current?.anchor() ?? null
+      // A rendered view that is still loading keeps the anchor the source view left.
+      pendingAnchor.current = editorApi.current?.anchor() ?? pendingAnchor.current
     }
     if (next !== 'source') lastRichMode.current = next
     modeRef.current = next
     setMode(next)
   }, [])
+
+  // Text replaced from outside (a save rewriting image links, a reload) keeps the caret; another document starts at the top.
+  useLayoutEffect(() => {
+    const editor = editorRef.current
+    if (mode !== 'source' || !editor) {
+      lastSourceRender.current = null
+      return
+    }
+    const previous = lastSourceRender.current
+    lastSourceRender.current = { documentId: activeDocument.documentId }
+    if (!previous || activeDocument.content === typedContent.current) return
+    const replaced = previous.documentId !== activeDocument.documentId
+    const { start, end, scrollTop } = replaced ? { start: 0, end: 0, scrollTop: 0 } : sourceSelection.current
+    const length = editor.value.length
+    editor.setSelectionRange(Math.min(start, length), Math.min(end, length))
+    editor.scrollTop = scrollTop
+    if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = editor.scrollTop
+    setCurrentLine(lineAtOffset(editor.value, Math.min(start, length)))
+  }, [activeDocument.content, activeDocument.documentId, mode])
 
   useLayoutEffect(() => {
     const anchor = pendingAnchor.current
@@ -158,6 +188,7 @@ function App() {
     textarea.setSelectionRange(offset, offset)
     textarea.scrollTop = sourceScrollTop(anchor, textarea.clientHeight, sourceMetrics(textarea))
     if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = textarea.scrollTop
+    sourceSelection.current = { start: offset, end: offset, scrollTop: textarea.scrollTop }
     setCurrentLine(anchor.line)
   }, [mode])
 
@@ -172,9 +203,10 @@ function App() {
   const applyTheme = useCallback((value: Theme) => {
     themeRef.current = value
     setTheme(value)
-    const dark = value === 'dark' || (value === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-    document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+    const resolved = isDark(value)
+    setDark(resolved)
+    document.documentElement.dataset.theme = resolved ? 'dark' : 'light'
+    document.documentElement.style.colorScheme = resolved ? 'dark' : 'light'
   }, [])
 
   useEffect(() => {
@@ -200,10 +232,22 @@ function App() {
   }, [preferences.startupMode, preferencesLoaded, switchMode])
 
   useEffect(() => {
-    if (!preferences.autoSave || !activeDocument.dirty || !activeDocument.filePath) return
+    const start = () => setComposing(true)
+    const end = () => setComposing(false)
+    document.addEventListener('compositionstart', start, true)
+    document.addEventListener('compositionend', end, true)
+    return () => {
+      document.removeEventListener('compositionstart', start, true)
+      document.removeEventListener('compositionend', end, true)
+    }
+  }, [])
+
+  // Waits for an input method to finish, so a pause on the candidate list does not write half-typed pinyin to disk.
+  useEffect(() => {
+    if (!preferences.autoSave || composing || !activeDocument.dirty || !activeDocument.filePath) return
     const timer = setTimeout(() => void autoSaveDocument(), AUTO_SAVE_DELAY)
     return () => clearTimeout(timer)
-  }, [activeDocument.content, activeDocument.dirty, activeDocument.filePath, autoSaveDocument, preferences.autoSave])
+  }, [activeDocument.content, activeDocument.dirty, activeDocument.filePath, autoSaveDocument, composing, preferences.autoSave])
 
   useEffect(() => {
     // Captured before CodeMirror, whose Ctrl+/ would also comment out the current line of a code block.
@@ -221,48 +265,72 @@ function App() {
   useEffect(() => window.inkdown.feedback.onShow(() => setFeedbackOpen(true)), [])
   useEffect(() => window.inkdown.settings.onShow((section) => setSettingsSection(section ?? 'appearance')), [])
 
-  const changeSidebarWidth = (width: number) => {
+  const changeSidebarWidth = useCallback((width: number) => {
     setSidebarWidth(width)
     localStorage.setItem(SIDEBAR_WIDTH.storageKey, String(width))
-  }
+  }, [])
+  const openFolderAction = useCallback(() => void openFolder(), [openFolder])
+  const refreshFolderAction = useCallback(() => void refreshFolder(), [refreshFolder])
+  const closeFolderAction = useCallback(() => void closeFolder(), [closeFolder])
+  const openFileAction = useCallback((filePath: string) => void openPath(filePath), [openPath])
 
-  const selectOutline = (item: OutlineItem, index: number) => {
+  const selectOutline = useCallback((item: OutlineItem) => {
     const editor = editorRef.current
-    if (editor) {
-      editor.focus()
-      editor.setSelectionRange(item.offset, item.offset)
-      editor.scrollTop = Math.max(0, (item.line - 3) * SOURCE_LINE_HEIGHT)
-      setCurrentLine(item.line)
+    if (!editor) {
+      editorApi.current?.reveal({ line: item.line, ratio: 0.08 })
       return
     }
-    const headings = document.querySelectorAll<HTMLElement>('.visual-editor .ProseMirror :is(h1, h2, h3, h4, h5, h6)')
-    headings[index]?.scrollIntoView({ block: 'start' })
-  }
+    editor.focus({ preventScroll: true })
+    editor.setSelectionRange(item.offset, item.offset)
+    editor.scrollTop = sourceScrollTop({ line: item.line, ratio: 0.08 }, editor.clientHeight, sourceMetrics(editor))
+    if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = editor.scrollTop
+    sourceSelection.current = { start: item.offset, end: item.offset, scrollTop: editor.scrollTop }
+    setCurrentLine(item.line)
+  }, [])
 
   const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    const modifier = event.ctrlKey || event.metaKey
-    if (modifier && event.key.toLowerCase() === 'b') {
+    const plain = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey
+    const escapeArmed = tabEscape.current
+    tabEscape.current = event.key === 'Escape'
+    if (plain && event.key.toLowerCase() === 'b') {
       event.preventDefault()
       applyFormat('**', '**', '粗体')
-    } else if (modifier && event.key.toLowerCase() === 'i') {
+    } else if (plain && event.key.toLowerCase() === 'i') {
       event.preventDefault()
       applyFormat('*', '*', '斜体')
-    } else if (event.key === 'Tab') {
+    } else if (event.key === 'Tab' && !event.ctrlKey && !event.metaKey && !event.altKey && !escapeArmed) {
+      // Esc then Tab leaves the editor for keyboard users.
       event.preventDefault()
-      applyFormat('  ', '', '')
+      indent(event.shiftKey)
     }
   }
 
   const updateCurrentLine = () => {
     const editor = editorRef.current
-    if (editor) setCurrentLine(editor.value.slice(0, editor.selectionStart).split('\n').length)
+    if (!editor) return
+    sourceSelection.current = { start: editor.selectionStart, end: editor.selectionEnd, scrollTop: editor.scrollTop }
+    setCurrentLine(lineAtOffset(editor.value, editor.selectionStart))
   }
 
+  const dragEnter = (event: DragEvent) => {
+    if (!draggingDocuments(event)) return
+    dragDepth.current += 1
+    setDragging(true)
+  }
+  const dragLeave = () => {
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (dragDepth.current === 0) setDragging(false)
+  }
   const drop = (event: DragEvent) => {
+    dragDepth.current = 0
     setDragging(false)
     const file = event.dataTransfer.files[0]
-    if (!file || !DOCUMENT_FILE.test(file.name)) return
+    if (!file || file.type.startsWith('image/')) return
     event.preventDefault()
+    if (!DOCUMENT_FILE.test(file.name)) {
+      showNotice('只能打开 .md、.markdown 或 .txt 文件')
+      return
+    }
     const filePath = window.inkdown.document.pathForFile(file)
     if (filePath) void openPath(filePath)
   }
@@ -279,6 +347,7 @@ function App() {
     closeDocument, newDocument, openDocument, openPath, saveAsDocument, saveDocument,
   ])
 
+  const statusMessage = notice ?? status
   return (
     <div
       className={`app mode-${mode} ${dragging ? 'is-dragging' : ''}`}
@@ -287,12 +356,9 @@ function App() {
         '--editor-font-size': `${preferences.fontSize}px`,
         '--content-width': contentWidthCss(preferences.contentWidth),
       } as CSSProperties}
-      onDragOver={(event) => {
-        if (!Array.from(event.dataTransfer.items).some((item) => item.kind === 'file' && !item.type.startsWith('image/'))) return
-        event.preventDefault()
-        setDragging(true)
-      }}
-      onDragLeave={() => setDragging(false)}
+      onDragEnter={dragEnter}
+      onDragOver={(event) => { if (draggingDocuments(event)) event.preventDefault() }}
+      onDragLeave={dragLeave}
       onDrop={drop}
     >
       <header className="topbar">
@@ -304,12 +370,13 @@ function App() {
           <span className="action-divider" />
           <button type="button" onClick={() => void newDocument()} title="新建 (Ctrl+N)" aria-label="新建文档"><FilePlus2 /></button>
           <button type="button" onClick={() => void openDocument()} title="打开 (Ctrl+O)" aria-label="打开文档"><FolderOpen /></button>
-          <button type="button" onClick={() => void openFolder()} title="打开文件夹 (Ctrl+Shift+O)" aria-label="打开文件夹"><FolderTree /></button>
+          <button type="button" onClick={openFolderAction} title="打开文件夹 (Ctrl+Shift+O)" aria-label="打开文件夹"><FolderTree /></button>
           <button type="button" onClick={() => void saveDocument()} title="保存 (Ctrl+S)" aria-label="保存文档"><Save /></button>
           <button type="button" onClick={() => void saveAsDocument()} title="另存为 (Ctrl+Shift+S)" aria-label="另存为"><SaveAll /></button>
         </nav>
-        <div className="title-area" title={activeDocument.filePath ?? activeDocument.fileName}>
-          <span>{activeDocument.fileName}</span>{activeDocument.dirty && <span className="dirty-dot" aria-label="未保存">●</span>}
+        <div className="title-area">
+          <span className="title-name">{activeDocument.fileName}</span>
+          {activeDocument.dirty && <span className="dirty-dot" aria-label="未保存">●</span>}
           {mode === 'reading' && <span className="readonly-badge">只读</span>}
         </div>
         <div className="view-actions">
@@ -335,14 +402,11 @@ function App() {
           </div>
           <button className="theme-toggle" type="button"
             onClick={() => {
-              const next: Theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'
-              setTheme(next)
-              themeRef.current = next
-              document.documentElement.dataset.theme = next
-              document.documentElement.style.colorScheme = next
+              const next: Theme = dark ? 'light' : 'dark'
+              applyTheme(next)
               void window.inkdown.view.setTheme(next)
             }} aria-label="切换明暗主题" title={`当前主题：${theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色'}`}>
-            {document.documentElement.dataset.theme === 'dark' ? <Sun /> : <Moon />}
+            {dark ? <Sun /> : <Moon />}
           </button>
           <button type="button" onClick={() => setSettingsSection('appearance')} title="设置 (Ctrl+,)" aria-label="设置">
             <Settings />
@@ -371,14 +435,14 @@ function App() {
               <option value="6">六级标题</option>
             </select>
           </label>
-          <button type="button" onClick={() => applyFormat('**', '**', '粗体')} title="粗体" aria-label="插入粗体"><Bold /></button>
-          <button type="button" onClick={() => applyFormat('*', '*', '斜体')} title="斜体" aria-label="插入斜体"><Italic /></button>
+          <button type="button" onClick={() => applyFormat('**', '**', '粗体')} title="粗体 (Ctrl+B)" aria-label="插入粗体"><Bold /></button>
+          <button type="button" onClick={() => applyFormat('*', '*', '斜体')} title="斜体 (Ctrl+I)" aria-label="插入斜体"><Italic /></button>
           <button type="button" onClick={() => applyFormat('~~', '~~', '删除线')} title="删除线" aria-label="插入删除线"><Strikethrough /></button>
           <span className="separator" />
-          <button type="button" onClick={() => applyFormat('- ', '', '列表项')} title="无序列表" aria-label="插入无序列表"><List /></button>
-          <button type="button" onClick={() => applyFormat('1. ', '', '列表项')} title="有序列表" aria-label="插入有序列表"><ListOrdered /></button>
-          <button type="button" onClick={() => applyFormat('- [ ] ', '', '任务')} title="任务列表" aria-label="插入任务列表"><CheckSquare /></button>
-          <button type="button" onClick={() => applyFormat('> ', '', '引用')} title="引用" aria-label="插入引用"><Quote /></button>
+          <button type="button" onClick={() => applyLinePrefix('bullet', '列表项')} title="无序列表" aria-label="插入无序列表"><List /></button>
+          <button type="button" onClick={() => applyLinePrefix('ordered', '列表项')} title="有序列表" aria-label="插入有序列表"><ListOrdered /></button>
+          <button type="button" onClick={() => applyLinePrefix('task', '任务')} title="任务列表" aria-label="插入任务列表"><CheckSquare /></button>
+          <button type="button" onClick={() => applyLinePrefix('quote', '引用')} title="引用" aria-label="插入引用"><Quote /></button>
           <span className="separator" />
           <button type="button" onClick={() => applyFormat('`', '`', '代码')} title="行内代码" aria-label="插入行内代码"><Braces /></button>
           <button className="badged-tool" type="button"
@@ -423,8 +487,8 @@ function App() {
         {sidebarOpen && (
           <Sidebar view={sidebarView} onViewChange={setSidebarView} width={sidebarWidth} onWidthChange={changeSidebarWidth}
             outline={outline} onOutlineSelect={selectOutline} workspace={workspace} activePath={activeDocument.filePath}
-            onOpenFolder={() => void openFolder()} onRefreshFolder={() => void refreshFolder()}
-            onCloseFolder={() => void closeFolder()} onOpenFile={(filePath) => void openPath(filePath)} />
+            onOpenFolder={openFolderAction} onRefreshFolder={refreshFolderAction}
+            onCloseFolder={closeFolderAction} onOpenFile={openFileAction} />
         )}
         {mode === 'source' ? (
           <section className="editor-pane" aria-label="Markdown 编辑器">
@@ -432,13 +496,17 @@ function App() {
               <div className="line-numbers" ref={lineNumbersRef} aria-hidden="true">
                 <span className="line-number-list">{lineNumbers}</span>
                 <span className="current-line-number" style={{
-                  '--line-index': currentLine - 1,
-                } as CSSProperties}>{currentLine}</span>
+                  '--line-index': Math.min(currentLine, stats.lines) - 1,
+                } as CSSProperties}>{Math.min(currentLine, stats.lines)}</span>
               </div>
               <textarea ref={editorRef} value={activeDocument.content}
-                onChange={(event) => updateContent(event.target.value)}
+                onChange={(event) => {
+                  typedContent.current = event.target.value
+                  updateContent(event.target.value)
+                }}
                 onKeyDown={handleEditorKeyDown} onClick={updateCurrentLine} onKeyUp={updateCurrentLine}
                 onSelect={updateCurrentLine} onScroll={(event) => {
+                  sourceSelection.current.scrollTop = event.currentTarget.scrollTop
                   if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = event.currentTarget.scrollTop
                 }}
                 onPaste={(event) => {
@@ -451,6 +519,7 @@ function App() {
                   const files = imageFiles(event.dataTransfer)
                   if (!files.length) return
                   event.preventDefault()
+                  event.stopPropagation()
                   void insertSourceImages(files)
                 }}
                 wrap="off" spellCheck={preferences.spellcheck} aria-label="Markdown 源码" placeholder="开始写作…" />
@@ -459,8 +528,8 @@ function App() {
         ) : (
           <section className="visual-pane" aria-label={mode === 'reading' ? 'Markdown 阅读视图' : 'Markdown 所见即所得区域'}>
             <Suspense fallback={<div className="visual-editor-loading" aria-label="正在准备所见即所得编辑器" />}>
-              <WysiwygEditor markdown={activeDocument.content} documentPath={activeDocument.filePath}
-                readOnly={mode === 'reading'} codeLanguage={preferences.codeLanguage}
+              <WysiwygEditor markdown={activeDocument.content} documentId={activeDocument.documentId}
+                documentPath={activeDocument.filePath} readOnly={mode === 'reading'} codeLanguage={preferences.codeLanguage}
                 onChange={updateContent} onNotice={showNotice} onReady={editorReady} />
             </Suspense>
           </section>
@@ -473,18 +542,22 @@ function App() {
         <SettingsDialog documentPath={activeDocument.filePath} preferences={preferences} initialSection={settingsSection}
           onClose={() => setSettingsSection(null)} onSave={updatePreferences} onSaved={showNotice} />
       )}
-      <footer className="statusbar" aria-live="polite">
+      <footer className="statusbar">
         <div className="status-messages">
-          <span>{notice ?? status}</span>
+          <span className="status-text" aria-live="polite" title={statusMessage}>{statusMessage}</span>
+          {saveProblem && <span className="status-problem" role="alert" title={saveProblem}>{saveProblem}</span>}
           {updateMessage && (
-            <span className="update-status" aria-live={updateState.phase === 'downloading' ? 'off' : undefined}>
+            <span className="update-status" aria-live={updateState.phase === 'downloading' ? 'off' : 'polite'}>
               {updateMessage}
             </span>
           )}
         </div>
-        <span className="document-name">{activeDocument.filePath ?? '尚未保存到磁盘'}</span>
+        <span className="document-name" title={activeDocument.filePath ?? undefined}>
+          <bdi>{activeDocument.filePath ?? '尚未保存到磁盘'}</bdi>
+        </span>
         <div className="stats"><span>{stats.words} 字词</span><span>{stats.characters} 字符</span>
-          <span>行 {currentLine}/{stats.lines}</span><span>约 {stats.readingMinutes} 分钟阅读</span></div>
+          <span>{mode === 'source' ? `行 ${Math.min(currentLine, stats.lines)}/${stats.lines}` : `${stats.lines} 行`}</span>
+          <span>约 {stats.readingMinutes} 分钟阅读</span></div>
       </footer>
     </div>
   )

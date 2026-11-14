@@ -24,9 +24,9 @@ export interface SourceMetrics {
 
 const CONTAINERS = new Set(['root', 'list', 'listItem', 'blockquote', 'table', 'tableRow', 'footnoteDefinition'])
 
-/** Children that become ProseMirror nodes in the same order; link definitions have no node of their own. */
+/** Children that become ProseMirror nodes in the same order; link definitions are kept as paragraphs of raw text. */
 function blockChildren(node: MarkdownBlock): MarkdownBlock[] {
-  return CONTAINERS.has(node.type) ? (node.children ?? []).filter((child) => child.type !== 'definition') : []
+  return CONTAINERS.has(node.type) ? node.children ?? [] : []
 }
 
 /** Child indexes from the root to the deepest block containing `line`, or to the first block after it. */
@@ -98,6 +98,12 @@ export function sourceScrollTop(anchor: ViewAnchor, clientHeight: number, { line
   return Math.max(0, paddingTop + (anchor.line - 1) * lineHeight - anchor.ratio * clientHeight)
 }
 
+/** A zero-size box (CodeMirror hidden behind a diagram preview) has no meaningful position. */
+const measuredTop = (element: Element | undefined): number | undefined => {
+  const rect = element?.getBoundingClientRect()
+  return rect && (rect.width > 0 || rect.height > 0) ? rect.top : undefined
+}
+
 const measure = (read: () => number | undefined): number | null => {
   try {
     return read() ?? null
@@ -114,7 +120,7 @@ function codeLineTop(view: EditorView, blockPos: number, index: number): number 
   const dom = view.nodeDOM(blockPos)
   if (!(dom instanceof HTMLElement)) return null
   const lines = dom.querySelectorAll('.cm-line')
-  if (lines.length) return measure(() => lines[Math.min(index, lines.length - 1)].getBoundingClientRect().top)
+  if (lines.length) return measure(() => measuredTop(lines[Math.min(index, lines.length - 1)]))
   const placeholder = dom.querySelector('pre')
   if (!placeholder) return null
   const style = getComputedStyle(placeholder)

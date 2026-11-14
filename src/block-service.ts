@@ -64,6 +64,8 @@ export class ResponsiveBlockService {
   unBind = () => {
     this.#notify = undefined
     cancelAnimationFrame(this.#frame)
+    // A stale frame id would stop pointer tracking from ever being scheduled again after the editor reloads.
+    this.#frame = 0
   }
 
   addEvent = (dom: HTMLElement) => {

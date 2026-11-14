@@ -62,6 +62,7 @@ const doc = n.doc.create(null, [
   p('第一段'),
   n.bullet_list.create(null, [item('甲'), item('乙', n.bullet_list.create(null, item('乙一')))]),
   n.code_block.create(null, schema.text('const a = 1\nconst b = 2')),
+  p('[ref]: https://example.com'),
   n.blockquote.create(null, p('引用')),
   n.table.create(null, [n.table_row.create(null, [cell('列'), cell('值')]), n.table_row.create(null, [cell('a'), cell('1')])]),
 ])
@@ -114,17 +115,19 @@ const positionOf = (view: EditorView, text: string) => {
 describe('源码行与排版块的对应', () => {
   beforeAll(stubLayout)
 
-  it('按行号找到最深一层的块，跳过链接定义与块之间的空行', () => {
+  it('按行号找到最深一层的块，块之间的空行归到下一个块，链接定义也是一个块', () => {
     expect(blockPathAtLine(tree, 1)).toEqual([0])
     expect(blockPathAtLine(tree, 2)).toEqual([1])
     expect(blockPathAtLine(tree, 6)).toEqual([2, 1, 0])
     expect(blockPathAtLine(tree, 7)).toEqual([2, 1, 1, 0, 0])
     expect(blockPathAtLine(tree, 11)).toEqual([3])
     expect(blockPathAtLine(tree, 14)).toEqual([4])
-    expect(blockPathAtLine(tree, 20)).toEqual([5, 1, 0])
-    expect(blockPathAtLine(tree, 99)).toEqual([5, 1, 1])
+    expect(blockPathAtLine(tree, 15)).toEqual([5])
+    expect(blockPathAtLine(tree, 20)).toEqual([6, 1, 0])
+    expect(blockPathAtLine(tree, 99)).toEqual([6, 1, 1])
     expect(lineAtBlockPath(tree, [2, 1, 1, 0, 0])).toBe(7)
-    expect(lineAtBlockPath(tree, [4])).toBe(16)
+    expect(lineAtBlockPath(tree, [4])).toBe(14)
+    expect(lineAtBlockPath(tree, [5])).toBe(16)
     expect(lineAtBlockPath(tree, [9])).toBe(1)
     expect(lineAtBlockPath(tree, [])).toBe(1)
   })
@@ -190,6 +193,8 @@ describe('源码行与排版块的对应', () => {
     expect(scroller.scrollTop).toBe(420 - 100)
 
     revealAnchor(view, tree, markdown, { line: 14, ratio: 0 }, scroller)
+    expect(view.state.selection.$head.parent.textContent).toBe('[ref]: https://example.com')
+    revealAnchor(view, tree, markdown, { line: 16, ratio: 0 }, scroller)
     expect(view.state.selection.$head.parent.textContent).toBe('引用')
     revealAnchor(view, tree, markdown, { line: 20, ratio: 0 }, scroller)
     expect(view.state.selection.$head.parent.textContent).toBe('a')

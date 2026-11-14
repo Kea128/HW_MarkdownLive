@@ -113,17 +113,29 @@ export type ImageSaveResult =
   | { ok: false; error: string }
 
 export interface DocumentSnapshot {
+  /** Changes whenever another document (or a fresh copy from disk) replaces the current one. */
+  documentId: number
   content: string
   filePath: string | null
   fileName: string
   dirty: boolean
   recovered?: boolean
+  /** A one-off message about how the document was opened, such as an encoding conversion. */
+  notice?: string
 }
 
 export interface OperationResult {
   ok: boolean
   canceled?: boolean
   error?: string
+  /** The file to open no longer exists. */
+  missing?: boolean
+  /** An automatic save stopped because another program changed the file. */
+  conflict?: boolean
+}
+
+export interface SaveOptions {
+  auto?: boolean
 }
 
 export interface InkdownApi {
@@ -132,11 +144,11 @@ export interface InkdownApi {
     newDocument(): Promise<OperationResult>
     open(): Promise<OperationResult>
     openPath(filePath: string): Promise<OperationResult>
-    save(): Promise<OperationResult>
+    save(options?: SaveOptions): Promise<OperationResult>
     saveAs(): Promise<OperationResult>
     close(): Promise<OperationResult>
     pathForFile(file: File): string
-    changed(content: string): Promise<void>
+    changed(content: string, documentId: number): Promise<void>
     onUpdated(listener: (snapshot: DocumentSnapshot) => void): () => void
     onCommand(listener: (command: DocumentCommand) => void): () => void
   }

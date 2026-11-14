@@ -23,7 +23,7 @@ Object.defineProperty(window, 'matchMedia', {
   })),
 })
 
-const snapshot = { content: '', filePath: null, fileName: '未命名.md', dirty: false }
+const snapshot = { documentId: 1, content: '', filePath: null, fileName: '未命名.md', dirty: false }
 Object.defineProperty(window, 'inkdown', {
   configurable: true,
   value: {

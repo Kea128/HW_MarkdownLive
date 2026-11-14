@@ -146,9 +146,9 @@ test('真实桌面进程完成打开、编辑、预览、菜单快捷键与覆�
     await expect(distantEquation).toBeAttached()
     const equationReference = page.getByRole('link', { name: '式 (1)' })
     await expect(equationReference).toBeVisible()
-    await equationReference.click()
+    await equationReference.click({ modifiers: ['Control'] })
     await expect(numberedEquation).toHaveClass(/equation-target/)
-    await page.getByRole('link', { name: '式 (2)' }).click()
+    await page.getByRole('link', { name: '式 (2)' }).click({ modifiers: ['Control'] })
     await expect(distantEquation).toBeVisible()
     await expect(distantEquation).toHaveClass(/equation-target/)
     await expect(distantEquation.locator('.katex-display .katex')).not.toBeEmpty()
@@ -566,7 +566,7 @@ test('Ctrl+V 粘贴截图保存到文档同名 .assets 文件夹，未保存文�
     await expect.poll(() => readFile(newPath, 'utf8').catch(() => ''))
       .toMatch(/^!\[image-\d{17}\]\(新文档\.assets\/image-\d{17}\.png\)\n?$/)
     expect(await readdir(path.join(folder, '新文档.assets'))).toHaveLength(1)
-    expect(await readdir(staging)).toEqual([])
+    expect(await readdir(staging)).toHaveLength(1)
     await expect(page.locator('.title-area')).toContainText('新文档.md')
     await expect.poll(() => images.first().evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBe(40)
   } finally {
@@ -871,6 +871,13 @@ test('切换视图保持位置；阅读模式只读；代码块默认语言；�
     expect(await visual.evaluate((element) => getComputedStyle(element).fontSize)).toBe('20px')
     expect(await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.find((item) => item.label.includes('编辑'))
       ?.submenu?.items.find((item) => item.label === '拼写检查')?.checked)).toBe(true)
+    const zoomItems = await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.find((item) => item.label.includes('视图'))
+      ?.submenu?.items.filter((item) => item.label === '放大').map((item) => item.accelerator))
+    expect(zoomItems).toEqual(['Ctrl+=', 'Ctrl+Plus', 'Ctrl+numadd'])
+    await clickMenu('视图', '放大')
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].maximize())
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomLevel())).toBe(0.5)
+    await expect.poll(async () => JSON.parse(await readFile(path.join(profile, 'settings.json'), 'utf8')).maximized).toBe(true)
 
     await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
     app = await launch()
@@ -882,6 +889,80 @@ test('切换视图保持位置；阅读模式只读；代码块默认语言；�
     expect(await spellchecking()).toBe(true)
     expect(await page.getByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
       .evaluate((element) => getComputedStyle(element).fontSize)).toBe('20px')
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getZoomLevel())).toBe(0.5)
+    expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isMaximized())).toBe(true)
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
+test('编辑保存不改写方括号、空行、latex 代码块与链接定义；阅读模式代码块不可修改；GBK 文件正常打开', async () => {
+  test.setTimeout(90_000)
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-fidelity-'))
+  const filePath = path.join(directory, '保真.md')
+  await writeFile(filePath, [
+    '# 保真测试', '', '第一段。', '', '<br />', '', '第二段。', '', '```latex', '\\documentclass{article}', '```', '',
+    '[//]: # (内部备注)', '', '见 [文档][docs]。', '', '[docs]: https://example.com/docs', '',
+  ].join('\n'), 'utf8')
+  const gbkPath = path.join(directory, '旧笔记.md')
+  await writeFile(gbkPath, Buffer.from([0x23, 0x20, 0xc4, 0xe3, 0xba, 0xc3, 0x0a]))
+  const app = await electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${path.join(directory, 'profile')}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  try {
+    const page = await app.firstWindow()
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await page.waitForLoadState('domcontentloaded')
+    await page.evaluate((target) => window.inkdown.document.openPath(target), filePath)
+    const visual = page.getByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    await expect(page.getByRole('heading', { name: '保真测试' })).toBeVisible()
+    const latexBlock = page.locator('.milkdown-code-block').filter({ hasText: 'documentclass' })
+    await expect(latexBlock).toBeVisible()
+    await expect(latexBlock.locator('.katex')).toHaveCount(0)
+
+    const paragraph = visual.locator('p').filter({ hasText: '第一段' })
+    await paragraph.click()
+    await page.keyboard.press('End')
+    await page.keyboard.type(' see [1]')
+    await page.waitForTimeout(500)
+    await page.keyboard.type(' ok')
+    await expect(paragraph).toContainText('第一段。 see [1] ok')
+    await expect(visual).not.toContainText('$$')
+    await page.getByTitle('保存 (Ctrl+S)').click()
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+    const saved = await readFile(filePath, 'utf8')
+    expect(saved).toContain('第一段。 see \\[1] ok')
+    expect(saved).not.toContain('$$')
+    expect(saved).toContain('<br />')
+    expect(saved).toContain('```latex\n\\documentclass{article}\n```')
+    expect(saved).toContain('[//]: # (内部备注)')
+    expect(saved).toContain('[docs]: https://example.com/docs')
+    expect(saved).toContain('[文档](https://example.com/docs)')
+
+    await app.evaluate(({ Menu }) => {
+      const view = Menu.getApplicationMenu()?.items.find((item) => item.label.includes('视图'))
+      const reading = view?.submenu?.items.find((item) => item.label === '阅读模式（只读）')
+      reading?.click?.(reading, undefined, {} as Electron.KeyboardEvent)
+    })
+    await expect(visual).toHaveAttribute('contenteditable', 'false')
+    await latexBlock.locator('.cm-content').click()
+    await page.keyboard.press('Home')
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('Control+Enter')
+    await page.keyboard.press('Control+Z')
+    await page.waitForTimeout(400)
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+    await expect(latexBlock).toContainText('\\documentclass{article}')
+
+    await page.evaluate((target) => window.inkdown.document.openPath(target), gbkPath)
+    await expect(page.getByRole('heading', { name: '你好' })).toBeVisible()
+    await expect(page.locator('.status-messages')).toContainText('GBK/GB18030')
+    expect(errors).toEqual([])
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
     await new Promise((resolve) => setTimeout(resolve, 500))

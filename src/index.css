@@ -12,7 +12,8 @@
   --editor-text: #1f2328;
   --heading: #15191e;
   --muted: #59616b;
-  --faint: #89919b;
+  /* At least 4.5:1 on the surface and sidebar backgrounds, for the small hint text that uses it. */
+  --faint: #6b7280;
   --accent: #2563a6;
   --danger: #a33b42;
   --link: #1f67ad;
@@ -50,7 +51,7 @@
   --editor-text: #edf0f3;
   --heading: #ffffff;
   --muted: #aeb6c0;
-  --faint: #77818d;
+  --faint: #8d97a3;
   --accent: #73b3f3;
   --danger: #e27d7d;
   --link: #79b8d3;

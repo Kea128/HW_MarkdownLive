@@ -34,6 +34,10 @@ vi.mock('../src/editor-breaks', () => ({
   keepInlineBreaks: vi.fn(),
 }))
 
+vi.mock('../src/editor-guards', () => ({ guardReadOnly: vi.fn() }))
+vi.mock('../src/link-definitions', () => ({ preserveLinkDefinitions: vi.fn() }))
+vi.mock('../src/latex-fences', () => ({ keepLatexFences: vi.fn() }))
+
 vi.mock('../src/mermaid-preview', () => ({
   isMermaidLanguage: (language: string) => language.toLowerCase() === 'mermaid',
   renderMermaidPreview: vi.fn(() => undefined),
@@ -177,7 +181,7 @@ describe('WysiwygEditor 生命周期', () => {
     expect(codeMirror.renderPreview('ts', 'const a = 1', apply)).toBeNull()
     expect(codeMirror.renderPreview('Mermaid', '   ', apply)).toBeNull()
     expect(codeMirror.renderPreview('Mermaid', 'flowchart LR\n  A --> B', apply)).toBeUndefined()
-    expect(renderMermaidPreview).toHaveBeenCalledWith('flowchart LR\n  A --> B', apply)
+    expect(renderMermaidPreview).toHaveBeenCalledWith('flowchart LR\n  A --> B', apply, null)
     expect(codeMirror.languages.map(({ name }) => name)).toEqual(expect.arrayContaining(['mermaid', 'frontmatter']))
     expect(codeMirror.languages.some(({ name }) => name === 'TypeScript')).toBe(true)
     expect((crepeState.featureConfigs.CodeMirror as { theme: unknown }).theme).toBeNull()
@@ -206,8 +210,9 @@ describe('WysiwygEditor 生命周期', () => {
     expect(onNotice).toHaveBeenCalledWith('图片已保存到 初始.assets/image-20261112170000000.png')
   })
 
-  it('拦截安全外链并遵循减少动态效果设置', async () => {
-    const { container } = render(<WysiwygEditor markdown="# 初始" onChange={vi.fn()} />)
+  it('编辑时 Ctrl+单击打开链接、单击只放置光标；阅读模式单击即打开', async () => {
+    const onNotice = vi.fn()
+    const { container, rerender } = render(<WysiwygEditor markdown="# 初始" onChange={vi.fn()} onNotice={onNotice} />)
     await screen.findByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
     const host = container.querySelector('.visual-editor > div')!
     host.insertAdjacentHTML('beforeend', [
@@ -219,9 +224,29 @@ describe('WysiwygEditor 生命周期', () => {
     target.scrollIntoView = vi.fn()
 
     fireEvent.click(screen.getByRole('link', { name: '外链' }))
+    expect(window.inkdown.external.open).not.toHaveBeenCalled()
+    expect(onNotice).toHaveBeenCalledWith('按住 Ctrl 单击可打开链接')
+    fireEvent.click(screen.getByRole('link', { name: '外链' }), { ctrlKey: true })
     expect(window.inkdown.external.open).toHaveBeenCalledWith('https://example.com/')
-    fireEvent.click(screen.getByRole('link', { name: '公式引用' }))
+    fireEvent.click(screen.getByRole('link', { name: '公式引用' }), { ctrlKey: true })
     expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'center' })
+
+    rerender(<WysiwygEditor markdown="# 初始" readOnly onChange={vi.fn()} onNotice={onNotice} />)
+    fireEvent.click(screen.getByRole('link', { name: '外链' }))
+    expect(window.inkdown.external.open).toHaveBeenCalledTimes(2)
+  })
+
+  it('父组件回传编辑器刚报告的内容时不重新载入，避免撤销记录和光标丢失', async () => {
+    const onChange = vi.fn()
+    const { rerender } = render(<WysiwygEditor markdown="# 初始" documentId={1} onChange={onChange} />)
+    await screen.findByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    crepeState.action.mockClear()
+    crepeState.markdownUpdated?.({}, 'see \\[1]')
+    expect(onChange).toHaveBeenLastCalledWith('see \\[1]')
+    rerender(<WysiwygEditor markdown="see \[1]" documentId={1} onChange={onChange} />)
+    expect(crepeState.action).not.toHaveBeenCalledWith(expect.objectContaining({ markdown: expect.anything() }))
+    rerender(<WysiwygEditor markdown="# 新文档" documentId={2} onChange={onChange} />)
+    await waitFor(() => expect(crepeState.action).toHaveBeenCalledWith({ markdown: '# 新文档' }))
   })
 
   it('初始化失败时回退为可编辑源码框', async () => {

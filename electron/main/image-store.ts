@@ -1,9 +1,10 @@
 import { constants } from 'node:fs'
-import { copyFile, mkdir, stat, unlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { ImageFolderSetting, ImageSaveResult } from '../../src/contracts'
 import { expandFolderTemplate, folderTemplate } from '../../src/image-folder'
 import { isImagePath } from '../../src/image-source'
+import { describeFileError } from './file-errors'
 import { isInsideWorkspace } from './workspace'
 
 const MIME_EXTENSIONS: Record<string, string> = {
@@ -17,8 +18,10 @@ const MIME_EXTENSIONS: Record<string, string> = {
 }
 const MAX_IMAGE_BYTES = 64 * 1024 * 1024
 const GENERIC_NAME = /^(?:image|img|clipboard|screenshot|untitled|blob|图片|截图)(?:[-_ ]?\d+)?$/i
-const MARKDOWN_IMAGE = /(!\[[^\]\n]*\]\(\s*)(<[^>\n]+>|[^)\s]+)/g
+// The editor writes `\]` in alt text and `\(` `\)` in destinations, so both allow backslash escapes.
+const MARKDOWN_IMAGE = /(!\[(?:\\.|[^\]\\\n])*\]\(\s*)(<[^>\n]+>|(?:\\.|[^\s()\\]|\((?:\\.|[^\s()\\])*\))+)/g
 const HTML_IMAGE = /(<img\b[^>]*?\bsrc\s*=\s*)("[^"]*"|'[^']*')/gi
+const MARKDOWN_ESCAPE = /\\([!-/:-@[-`{-~])/g
 
 export function imageFolder(documentPath: string, setting: ImageFolderSetting): string {
   const base = path.basename(documentPath, path.extname(documentPath))
@@ -65,6 +68,19 @@ async function isImageFile(filePath: string): Promise<boolean> {
   }
 }
 
+/** An earlier copy of `source` in `folder`, so saving again after an interrupted relocation does not duplicate it. */
+async function existingCopy(folder: string, base: string, extension: string, source: string): Promise<string | null> {
+  const original = await readFile(source).catch(() => null)
+  if (!original) return null
+  for (let index = 0; index < 20; index += 1) {
+    const candidate = path.join(folder, `${index ? `${base}-${index}` : base}${extension}`)
+    const existing = await readFile(candidate).catch(() => null)
+    if (!existing) return null
+    if (existing.equals(original)) return candidate
+  }
+  return null
+}
+
 export interface SaveImageOptions {
   documentPath: string | null
   stagingDir: string
@@ -107,7 +123,7 @@ export async function saveImage(input: unknown, options: SaveImageOptions): Prom
     return result(await writeUnique(folder, baseName(typeof name === 'string' ? name.replace(/\.[^.]*$/, '') : ''), extension,
       (target) => writeFile(target, data, { flag: 'wx' })))
   } catch (error) {
-    return { ok: false, error: `无法保存图片：${error instanceof Error ? error.message : String(error)}` }
+    return { ok: false, error: describeFileError(error, '保存图片') }
   }
 }
 
@@ -121,6 +137,8 @@ export interface RelocateOptions {
 export interface RelocatedImages {
   content: string
   staged: string[]
+  /** Images that could not be copied keep their old links. */
+  failed: number
 }
 
 const safeDecode = (value: string) => {
@@ -142,9 +160,10 @@ export async function relocateImages(content: string, options: RelocateOptions):
   const stagingPrefix = `${comparable(options.stagingDir)}/`
   const staged = new Set<string>()
   const links = new Map<string, string | null>()
+  let failed = 0
 
   const relink = async (destination: string): Promise<string | null> => {
-    const target = safeDecode(destination.trim())
+    const target = safeDecode(destination.trim().replace(MARKDOWN_ESCAPE, '$1'))
     if (!target || /^[a-z][a-z\d+.-]+:/i.test(target) || target.startsWith('//') || target.startsWith('#')) return null
     let source: string | null = null
     let fromStaging = false
@@ -159,13 +178,18 @@ export async function relocateImages(content: string, options: RelocateOptions):
     if (links.has(key)) return links.get(key) ?? null
     let link: string | null = null
     if (await isImageFile(source)) {
-      const folder = imageFolder(options.to, options.folder)
-      await mkdir(folder, { recursive: true })
-      const extension = path.extname(source)
-      const copied = await writeUnique(folder, path.basename(source, extension), extension,
-        (file) => copyFile(source, file, constants.COPYFILE_EXCL))
-      link = markdownLink(toFolder, copied)
-      if (fromStaging) staged.add(source)
+      try {
+        const folder = imageFolder(options.to, options.folder)
+        await mkdir(folder, { recursive: true })
+        const extension = path.extname(source)
+        const base = path.basename(source, extension)
+        const copied = await existingCopy(folder, base, extension, source)
+          ?? await writeUnique(folder, base, extension, (file) => copyFile(source, file, constants.COPYFILE_EXCL))
+        link = markdownLink(toFolder, copied)
+        if (fromStaging) staged.add(source)
+      } catch {
+        failed += 1
+      }
     }
     links.set(key, link)
     return link
@@ -187,9 +211,24 @@ export async function relocateImages(content: string, options: RelocateOptions):
 
   let result = await rewrite(content, MARKDOWN_IMAGE, (link) => /[\s()<>]/.test(link) ? `<${link}>` : link)
   result = await rewrite(result, HTML_IMAGE, (link, original) => `${original[0]}${link}${original[0]}`)
-  return { content: result, staged: [...staged] }
+  return { content: result, staged: [...staged], failed }
 }
 
 export async function removeStagedImages(files: string[]): Promise<void> {
   await Promise.all(files.map((file) => unlink(file).catch(() => undefined)))
+}
+
+/**
+ * Staged images stay until a later start: text typed during the first save can still link them, and the next save
+ * moves them again. Files older than `maxAge` that `keep` (the crash draft) does not mention are removed.
+ */
+export async function cleanStagedImages(stagingDir: string, keep: string, maxAge = 24 * 60 * 60 * 1000): Promise<void> {
+  const names = await readdir(stagingDir).catch(() => [] as string[])
+  const now = Date.now()
+  await Promise.all(names.map(async (name) => {
+    if (keep.includes(name)) return
+    const file = path.join(stagingDir, name)
+    const info = await stat(file).catch(() => null)
+    if (info?.isFile() && now - info.mtimeMs > maxAge) await unlink(file).catch(() => undefined)
+  }))
 }

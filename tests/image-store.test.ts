@@ -1,9 +1,9 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  imageFolder, imageTimestamp, relocateImages, removeStagedImages, sanitizeFileName, saveImage,
+  cleanStagedImages, imageFolder, imageTimestamp, relocateImages, removeStagedImages, sanitizeFileName, saveImage,
 } from '../electron/main/image-store'
 import { SettingsStore } from '../electron/main/settings-store'
 import type { ImageFolderSetting } from '../src/contracts'
@@ -19,7 +19,7 @@ const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2
 const now = new Date(2026, 10, 12, 17, 4, 5, 123)
 
 afterEach(async () => {
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
+  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })))
 })
 
 async function workspace() {
@@ -143,6 +143,52 @@ describe('保存文档时整理图片', () => {
     expect(moved.staged).toEqual([])
     expect(await readdir(path.join(root, '归档', '周报.assets'))).toEqual(['a.png'])
     expect(await readdir(path.join(notes, '周报 1.assets'))).toEqual(['a.png'])
+  })
+
+  it('识别编辑器写出的转义路径与说明，再次保存时复用已复制的图片，复制失败不影响保存', async () => {
+    const { root, notes, document, staging } = await workspace()
+    await mkdir(staging, { recursive: true })
+    await writeFile(path.join(staging, 'shot (1).png'), png)
+    const escaped = `${staging.split(path.sep).join('/')}/shot \\(1\\).png`.replace(/ /g, '%20')
+    const content = `![图 \\[v2\\]](${escaped})`
+    const first = await relocateImages(content, { from: null, to: document, stagingDir: staging, folder: assetsFolder })
+    expect(first.content).toBe('![图 \\[v2\\]](<周报 1.assets/shot (1).png>)')
+    expect(first.failed).toBe(0)
+    const again = await relocateImages(content, { from: null, to: document, stagingDir: staging, folder: assetsFolder })
+    expect(again.content).toBe(first.content)
+    expect(await readdir(path.join(notes, '周报 1.assets'))).toEqual(['shot (1).png'])
+
+    await writeFile(path.join(root, '占用'), 'not a folder')
+    const blocked: ImageFolderSetting = { mode: 'custom', template: path.join(root, '占用', '图片') }
+    const failed = await relocateImages(content, { from: null, to: document, stagingDir: staging, folder: blocked })
+    expect(failed).toMatchObject({ content, failed: 1 })
+  })
+
+  it('启动时只清理超过一天且未被草稿引用的暂存图片', async () => {
+    const { staging } = await workspace()
+    await mkdir(staging, { recursive: true })
+    const old = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+    for (const name of ['旧.png', '草稿引用.png', '新.png']) await writeFile(path.join(staging, name), png)
+    await utimes(path.join(staging, '旧.png'), old, old)
+    await utimes(path.join(staging, '草稿引用.png'), old, old)
+    await cleanStagedImages(staging, '{"content":"![a](C:/x/pasted-images/草稿引用.png)"}')
+    expect((await readdir(staging)).sort()).toEqual(['新.png', '草稿引用.png'].sort())
+    await cleanStagedImages(path.join(staging, '不存在'), '')
+  })
+
+  it('最近文件忽略大小写去重，可移除不存在的条目，损坏的设置文件会留存一份', async () => {
+    const { root } = await workspace()
+    const file = path.join(root, 'settings.json')
+    const store = new SettingsStore(file)
+    await store.load()
+    await store.addRecent('C:\\笔记\\周报.md')
+    expect(await store.addRecent('c:/笔记/周报.md')).toEqual(['c:/笔记/周报.md'])
+    expect(await store.removeRecent('C:\\笔记\\周报.md')).toEqual([])
+    await store.update({ maximized: true, zoomLevel: 1.5 })
+    expect(await new SettingsStore(file).load()).toMatchObject({ maximized: true, zoomLevel: 1.5 })
+    await writeFile(file, '{"recentFiles": [', 'utf8')
+    expect((await new SettingsStore(file).load()).recentFiles).toEqual([])
+    expect(await readFile(`${file}.broken`, 'utf8')).toBe('{"recentFiles": [')
   })
 
   it('在设置中保存并校验图片保存位置，旧版设置自动迁移', async () => {

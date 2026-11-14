@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/App'
-import type { DocumentCommand, UpdateState, WorkspaceSnapshot } from '../src/contracts'
+import type { DocumentCommand, DocumentSnapshot, UpdateState, WorkspaceSnapshot } from '../src/contracts'
 import { DEFAULT_PREFERENCES } from '../src/preferences'
 import type { EditorApi } from '../src/WysiwygEditor'
 
@@ -47,6 +47,7 @@ describe('Inkdown 桌面编辑器', () => {
     localStorage.clear()
     editorApi.anchor.mockReturnValue(null)
     vi.mocked(window.inkdown.document.initialize).mockResolvedValue({
+      documentId: 1,
       content: '# 初始文稿',
       filePath: 'C:\\中文\\初始.md',
       fileName: '初始.md',
@@ -62,7 +63,7 @@ describe('Inkdown 桌面编辑器', () => {
     expect(screen.getByRole('heading', { name: '新标题' })).toBeInTheDocument()
     expect(document.querySelector('script')).not.toBeInTheDocument()
     await waitFor(() => expect(window.inkdown.document.changed)
-      .toHaveBeenCalledWith('# 新标题\n\n<script>alert(1)</script>'))
+      .toHaveBeenCalledWith('# 新标题\n\n<script>alert(1)</script>', 1))
   })
 
   it('通过桌面桥接执行新建、打开、保存和另存为', async () => {
@@ -116,18 +117,13 @@ describe('Inkdown 桌面编辑器', () => {
     toggleSource()
     const editor = await screen.findByRole('textbox', { name: 'Markdown 源码' }) as HTMLTextAreaElement
     editor.setSelectionRange(2, 6)
-    await userEvent.click(screen.getByTitle('粗体'))
+    await userEvent.click(screen.getByRole('button', { name: '插入粗体' }))
     expect(editor).toHaveValue('# **初始文稿**')
     expect(screen.getByLabelText('未保存')).toBeInTheDocument()
   })
 
   it('主进程回显脏文档时保持未保存状态文案', async () => {
-    let updateListener: ((snapshot: {
-      content: string
-      filePath: string | null
-      fileName: string
-      dirty: boolean
-    }) => void) | undefined
+    let updateListener: ((snapshot: DocumentSnapshot) => void) | undefined
     vi.mocked(window.inkdown.document.onUpdated).mockImplementation((listener) => {
       updateListener = listener
       return () => undefined
@@ -135,6 +131,7 @@ describe('Inkdown 桌面编辑器', () => {
     render(<App />)
     await screen.findByRole('heading', { name: '初始文稿' })
     act(() => updateListener?.({
+      documentId: 1,
       content: '# 已修改',
       filePath: 'C:\\中文\\初始.md',
       fileName: '初始.md',
@@ -230,7 +227,7 @@ describe('Inkdown 桌面编辑器', () => {
     act(() => updateListener?.({ phase: 'downloading', version: '2.8.0', percent: 42.7 }))
     expect(screen.getByText('正在下载 v2.8.0（42%）')).toHaveAttribute('aria-live', 'off')
     act(() => updateListener?.({ phase: 'downloaded', version: '2.8.0' }))
-    expect(screen.getByText('v2.8.0 已下载，退出时自动安装')).not.toHaveAttribute('aria-live')
+    expect(screen.getByText('v2.8.0 已下载，退出时自动安装')).toHaveAttribute('aria-live', 'polite')
     act(() => updateListener?.({ phase: 'idle' }))
     expect(document.querySelector('.update-status')).not.toBeInTheDocument()
   })
@@ -354,7 +351,7 @@ describe('Inkdown 桌面编辑器', () => {
   it('切换源码与所见即所得时保持光标所在行和屏幕位置', async () => {
     const content = ['# 初始文稿', '', '第一段', '', '第二段', '', '第三段'].join('\n')
     vi.mocked(window.inkdown.document.initialize).mockResolvedValueOnce({
-      content, filePath: 'C:\\中文\\初始.md', fileName: '初始.md', dirty: false,
+      documentId: 1, content, filePath: 'C:\\中文\\初始.md', fileName: '初始.md', dirty: false,
     })
     render(<App />)
     await screen.findByRole('heading', { name: '初始文稿' })
@@ -386,15 +383,36 @@ describe('Inkdown 桌面编辑器', () => {
     expect(editor).toHaveAttribute('spellcheck', 'false')
   })
 
-  it('开启自动保存后，停止输入约 1 秒自动保存已存盘的文档', async () => {
+  it('开启自动保存后，停止输入约 1 秒自动保存已存盘的文档；被其他程序修改时暂停并保持提示', async () => {
+    let updateListener: ((snapshot: DocumentSnapshot) => void) | undefined
+    vi.mocked(window.inkdown.document.onUpdated).mockImplementation((listener) => {
+      updateListener = listener
+      return () => undefined
+    })
     vi.mocked(window.inkdown.settings.get).mockResolvedValueOnce({ ...DEFAULT_PREFERENCES, autoSave: true })
+    vi.mocked(window.inkdown.document.save).mockImplementationOnce(async () => {
+      updateListener?.({ documentId: 1, content: '# 自动保存', filePath: 'C:\\中文\\初始.md', fileName: '初始.md', dirty: false })
+      return { ok: true }
+    })
     render(<App />)
     const editor = await screen.findByRole('textbox', { name: '所见即所得测试输入' })
     await waitFor(() => expect(window.inkdown.settings.get).toHaveBeenCalled())
     fireEvent.change(editor, { target: { value: '# 自动保存' } })
     expect(window.inkdown.document.save).not.toHaveBeenCalled()
-    await waitFor(() => expect(window.inkdown.document.save).toHaveBeenCalledOnce(), { timeout: 3_000 })
+    await waitFor(() => expect(window.inkdown.document.save).toHaveBeenCalledWith({ auto: true }), { timeout: 3_000 })
     expect(await screen.findByText('已自动保存')).toBeInTheDocument()
+
+    vi.mocked(window.inkdown.document.save).mockResolvedValueOnce({
+      ok: false, conflict: true, error: '文件已在其他程序中修改，自动保存已暂停',
+    })
+    fireEvent.compositionStart(editor)
+    fireEvent.change(editor, { target: { value: '# 自动保存 pinyin' } })
+    await new Promise((resolve) => setTimeout(resolve, 1_300))
+    expect(window.inkdown.document.save).toHaveBeenCalledOnce()
+    fireEvent.compositionEnd(editor)
+    expect(await screen.findByRole('alert', {}, { timeout: 3_000 })).toHaveTextContent('自动保存已暂停')
+    fireEvent.change(editor, { target: { value: '# 继续输入' } })
+    expect(screen.getByRole('alert')).toHaveTextContent('自动保存已暂停')
   })
 
   it('源码模式插入图片时选择文件并写入相对路径', async () => {
@@ -477,6 +495,79 @@ describe('Inkdown 桌面编辑器', () => {
     fireEvent.doubleClick(resizer)
     expect(workspace.style.getPropertyValue('--sidebar-width')).toBe('260px')
     expect(localStorage.getItem('inkdown-sidebar-width')).toBe('260')
+  })
+
+  it('大纲跳过代码块和 front matter，点击后按源码行定位', async () => {
+    const content = [
+      '---', 'title: 示例', '---', '# 第一章', '', '```bash', '# 安装依赖', '```', '', '小节', '----', '', '## 学习C#',
+    ].join('\n')
+    vi.mocked(window.inkdown.document.initialize).mockResolvedValueOnce({
+      documentId: 1, content, filePath: 'C:\\中文\\初始.md', fileName: '初始.md', dirty: false,
+    })
+    render(<App />)
+    await screen.findByRole('heading', { name: '第一章' })
+    await userEvent.click(screen.getByRole('button', { name: '展开侧栏' }))
+    const outline = screen.getByRole('navigation', { name: '文档大纲' })
+    expect(within(outline).getAllByRole('button').map((item) => item.textContent)).toEqual(['第一章4', '小节10', '学习C#13'])
+    await userEvent.click(within(outline).getByRole('button', { name: /小节/ }))
+    expect(editorApi.reveal).toHaveBeenCalledWith({ line: 10, ratio: 0.08 })
+    toggleSource()
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 源码' }) as HTMLTextAreaElement
+    await userEvent.click(within(outline).getByRole('button', { name: /学习C#/ }))
+    expect(editor.selectionStart).toBe(content.indexOf('## 学习C#'))
+    expect(screen.getByText(/^行 13\//)).toBeInTheDocument()
+  })
+
+  it('源码快捷键：Ctrl+Shift+I 不插入斜体，Tab/Shift+Tab 缩进多行，列表按钮作用于每一行', async () => {
+    vi.mocked(window.inkdown.document.initialize).mockResolvedValueOnce({
+      documentId: 1, content: '甲\n乙', filePath: 'C:\\中文\\初始.md', fileName: '初始.md', dirty: false,
+    })
+    render(<App />)
+    await screen.findByLabelText('Markdown 所见即所得编辑器')
+    toggleSource()
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 源码' }) as HTMLTextAreaElement
+    await waitFor(() => expect(editor).toHaveValue('甲\n乙'))
+    editor.setSelectionRange(0, 3)
+    expect(fireEvent.keyDown(editor, { key: 'I', ctrlKey: true, shiftKey: true })).toBe(true)
+    expect(editor).toHaveValue('甲\n乙')
+    fireEvent.keyDown(editor, { key: 'Tab' })
+    expect(editor).toHaveValue('  甲\n  乙')
+    editor.setSelectionRange(0, editor.value.length)
+    fireEvent.keyDown(editor, { key: 'Tab', shiftKey: true })
+    expect(editor).toHaveValue('甲\n乙')
+    editor.setSelectionRange(0, editor.value.length)
+    await userEvent.click(screen.getByRole('button', { name: '插入有序列表' }))
+    expect(editor).toHaveValue('1. 甲\n2. 乙')
+    expect(screen.getByText(/^行 \d+\/2$/)).toBeInTheDocument()
+    toggleSource()
+    expect(await screen.findByText('2 行')).toBeInTheDocument()
+  })
+
+  it('拖入不支持的文件给出提示；对话框打开时不切换视图', async () => {
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    fireEvent.drop(document.querySelector('.app')!, { dataTransfer: { files: [new File(['%PDF'], '报告.pdf')] } })
+    expect(screen.getByText('只能打开 .md、.markdown 或 .txt 文件')).toBeInTheDocument()
+    expect(window.inkdown.document.openPath).not.toHaveBeenCalled()
+    await userEvent.click(screen.getByRole('button', { name: '意见反馈' }))
+    toggleSource()
+    expect(screen.queryByRole('textbox', { name: 'Markdown 源码' })).not.toBeInTheDocument()
+  })
+
+  it('设置对话框只保存在其中改动的选项，不覆盖菜单里同时做的修改', async () => {
+    let changedListener: ((preferences: typeof DEFAULT_PREFERENCES) => void) | undefined
+    vi.mocked(window.inkdown.settings.onChanged).mockImplementation((listener) => {
+      changedListener = listener
+      return () => undefined
+    })
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    await userEvent.click(screen.getByRole('button', { name: '设置' }))
+    const dialog = await screen.findByRole('dialog', { name: '设置' })
+    act(() => changedListener?.({ ...DEFAULT_PREFERENCES, spellcheck: true }))
+    await userEvent.selectOptions(within(dialog).getByLabelText('正文字号'), '18')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(window.inkdown.settings.set).toHaveBeenCalledWith({ fontSize: 18 }))
   })
 
   it('意见反馈：校验、提交到 GitHub 并显示结果', async () => {

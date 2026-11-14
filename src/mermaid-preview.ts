@@ -75,15 +75,35 @@ function remember(source: string, html: string): string {
   return html
 }
 
-export function renderMermaidPreview(source: string, applyPreview: ApplyPreview): string | undefined {
+const TYPING_DELAY = 300
+const typing = new WeakMap<Element, ReturnType<typeof setTimeout>>()
+
+function enqueue(source: string, applyPreview: ApplyPreview): void {
   const cached = cache.get(source)
-  // Previews must reach the editor in request order, so a cached diagram may only skip an idle queue.
-  if (cached !== undefined && pending === 0) return cached
   pending += 1
   const task = queue.then(async () => cached ?? remember(source, await renderDiagram(source)))
   queue = task.catch(() => undefined)
   void task
     .then(applyPreview, (error: unknown) => applyPreview(errorPreview(error)))
     .finally(() => { pending -= 1 })
+}
+
+/**
+ * `editing` is the code block the user is typing in. Each keystroke asked for a light and a dark render; while
+ * typing, only the text that stays unchanged for a moment is drawn and the previous diagram remains visible.
+ */
+export function renderMermaidPreview(source: string, applyPreview: ApplyPreview, editing?: Element | null): string | undefined {
+  const cached = cache.get(source)
+  // Previews must reach the editor in request order, so a cached diagram may only skip an idle queue.
+  if (cached !== undefined && pending === 0) return cached
+  if (!editing) {
+    enqueue(source, applyPreview)
+    return undefined
+  }
+  clearTimeout(typing.get(editing))
+  typing.set(editing, setTimeout(() => {
+    typing.delete(editing)
+    enqueue(source, applyPreview)
+  }, TYPING_DELAY))
   return undefined
 }

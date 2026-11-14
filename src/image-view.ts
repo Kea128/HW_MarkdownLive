@@ -134,11 +134,13 @@ export class ImageView implements NodeView {
     if (this.dom.classList.contains('is-selected')) this.#renderToolbar()
   }
 
+  /** Alignment wraps the image in `<p align>`, which a table cell cannot hold: it would reopen as raw tags. */
   #standalone(): boolean {
     const pos = this.#getPos()
     if (pos === undefined) return false
-    const parent = this.#view.state.doc.resolve(pos).parent
-    return parent.type.name === 'paragraph' && parent.childCount === 1
+    const $pos = this.#view.state.doc.resolve(pos)
+    const container = $pos.depth > 0 ? $pos.node($pos.depth - 1).type.name : ''
+    return $pos.parent.type.name === 'paragraph' && $pos.parent.childCount === 1 && !/^table_(?:cell|header)$/.test(container)
   }
 
   #button(label: string, svg: string, run: () => void, options: { active?: boolean; disabled?: boolean; title?: string } = {}) {
@@ -271,7 +273,11 @@ export class ImageView implements NodeView {
 
   #commit(next: ImageModel): void {
     const pos = this.#getPos()
-    if (pos === undefined) return
+    // Rewriting unchanged HTML would drop attributes the model does not track and mark the document as edited.
+    if (pos === undefined || JSON.stringify(next) === JSON.stringify(this.#model)) {
+      this.#renderToolbar()
+      return
+    }
     const { state } = this.#view
     const replacement = isPlainImage(next)
       ? state.schema.nodes.image.create({ src: next.src, alt: next.alt, title: next.title })

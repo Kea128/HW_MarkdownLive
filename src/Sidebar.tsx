@@ -1,15 +1,10 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
+import { memo, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { ChevronDown, ChevronRight, FileText, FolderOpen, RefreshCw, X } from 'lucide-react'
 import type { WorkspaceEntry, WorkspaceSnapshot } from './contracts'
+import type { OutlineItem } from './outline'
 import { clampSidebarWidth, SIDEBAR_WIDTH } from './sidebar-width'
 
-export interface OutlineItem {
-  level: number
-  text: string
-  line: number
-  offset: number
-}
-
+export type { OutlineItem }
 export type SidebarView = 'files' | 'outline'
 
 interface SidebarProps {
@@ -18,7 +13,7 @@ interface SidebarProps {
   width: number
   onWidthChange(width: number): void
   outline: OutlineItem[]
-  onOutlineSelect(item: OutlineItem, index: number): void
+  onOutlineSelect(item: OutlineItem): void
   workspace: WorkspaceSnapshot | null
   activePath: string | null
   onOpenFolder(): void
@@ -127,9 +122,9 @@ function FilesPanel({ workspace, activePath, onOpenFolder, onRefreshFolder, onCl
 function OutlinePanel({ outline, onOutlineSelect }: Pick<SidebarProps, 'outline' | 'onOutlineSelect'>) {
   return (
     <nav className="outline" aria-label="文档大纲">
-      {outline.length ? outline.map((item, index) => (
+      {outline.length ? outline.map((item) => (
         <button key={`${item.line}-${item.text}`} type="button" style={{ paddingLeft: `${12 + (item.level - 1) * 12}px` }}
-          onClick={() => onOutlineSelect(item, index)}>
+          onClick={() => onOutlineSelect(item)} title={item.text}>
           <span>{item.text}</span><small>{item.line}</small>
         </button>
       )) : <p className="outline-empty">添加标题后，这里会显示文档结构。</p>}
@@ -190,7 +185,8 @@ function SidebarResizer({ width, onWidthChange }: Pick<SidebarProps, 'width' | '
   )
 }
 
-export function Sidebar(props: SidebarProps) {
+/** Memoised: typing re-renders the app on every keystroke, and the file tree can hold thousands of entries. */
+export const Sidebar = memo(function Sidebar(props: SidebarProps) {
   const { view, onViewChange } = props
   return (
     <>
@@ -217,4 +213,4 @@ export function Sidebar(props: SidebarProps) {
       <SidebarResizer width={props.width} onWidthChange={props.onWidthChange} />
     </>
   )
-}
+})

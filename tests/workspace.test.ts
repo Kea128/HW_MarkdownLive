@@ -8,7 +8,7 @@ import { isInsideWorkspace, isWorkspaceRoot, scanWorkspace, workspaceFiles } fro
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
+  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })))
 })
 
 async function createTree(files: string[]): Promise<string> {

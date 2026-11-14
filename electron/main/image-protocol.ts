@@ -6,10 +6,10 @@ export function registerImageScheme(): void {
   protocol.registerSchemesAsPrivileged([{ scheme: IMAGE_PROTOCOL, privileges: { standard: true, secure: true } }])
 }
 
-export function serveLocalImages(): void {
+export function serveLocalImages(isAllowed: (filePath: string) => boolean): void {
   protocol.handle(IMAGE_PROTOCOL, async (request) => {
     const filePath = fromImageUrl(request.url)
-    if (!filePath) return new Response(null, { status: 404 })
+    if (!filePath || !isAllowed(filePath)) return new Response(null, { status: 404 })
     try {
       const file = await net.fetch(pathToFileURL(filePath).href)
       return new Response(file.body, {

@@ -61,10 +61,18 @@ export function FeedbackDialog({ onClose }: { onClose(): void }) {
     }
   }
 
+  /** A long description should not vanish with a stray Escape or click beside the dialog. */
+  const dismiss = () => {
+    const details = form.details.trim().length
+    const drafted = !submitted && (details > 20 || (details > 0 && form.title.trim().length > 0))
+    if (drafted && !window.confirm('放弃这条尚未提交的反馈？')) return
+    onClose()
+  }
+
   const keyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') {
       event.preventDefault()
-      onClose()
+      dismiss()
       return
     }
     if (event.key !== 'Tab') return
@@ -82,8 +90,8 @@ export function FeedbackDialog({ onClose }: { onClose(): void }) {
   }
 
   return (
-    <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section ref={dialogRef} className="app-dialog" role="dialog" aria-modal="true"
+    <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss() }}>
+      <section ref={dialogRef} className="app-dialog" role="dialog" aria-modal="true" tabIndex={-1}
         aria-labelledby="feedback-title" onKeyDown={keyDown}>
         <header>
           <h2 id="feedback-title">意见反馈</h2>

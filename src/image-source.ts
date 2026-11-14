@@ -22,6 +22,12 @@ export function isImagePath(filePath: string): boolean {
   return IMAGE_EXTENSIONS.has(extension(filePath))
 }
 
+/** Server of a `\\server\share` path, lower-cased; reading such a path makes Windows sign in to that server. */
+export function uncHost(filePath: string | null | undefined): string | null {
+  const match = filePath ? /^[\\/]{2}([^\\/]+)[\\/]/.exec(filePath) : null
+  return match ? match[1].toLowerCase() : null
+}
+
 export function normalizeWindowsPath(filePath: string): string {
   const unc = filePath.startsWith('\\\\')
   const parts = filePath.replace(/^[\\/]+/, '').split(/[\\/]+/)

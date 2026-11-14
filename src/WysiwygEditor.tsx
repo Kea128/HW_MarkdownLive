@@ -14,11 +14,14 @@ import { ResponsiveBlockService } from './block-service'
 import { applyDefaultCodeLanguage, plainTextLanguage } from './code-languages'
 import { codeTheme } from './code-theme'
 import { keepInlineBreaks } from './editor-breaks'
+import { guardReadOnly } from './editor-guards'
 import { prepareEquationMarkdown, restoreEquationMarkdown } from './equations'
 import { FRONT_MATTER_LANGUAGE, prepareFrontMatter, restoreFrontMatter } from './front-matter'
 import { IMAGE_MENU_ICON, insertImages, installImagePlugins } from './editor-images'
 import { decorateEquationBlocks, hasEquationMutation } from './equation-decoration'
 import { resolveImageSource } from './image-source'
+import { keepLatexFences } from './latex-fences'
+import { preserveLinkDefinitions } from './link-definitions'
 import { normalizeMathDelimiters } from './markdown'
 import { mermaidLanguage } from './mermaid-language'
 import { isMermaidLanguage, renderMermaidPreview } from './mermaid-preview'
@@ -38,6 +41,8 @@ export interface EditorApi {
 
 interface Props {
   markdown: string
+  /** Changes when another document replaces this one; new text for the same document keeps the reading position. */
+  documentId?: number
   documentPath?: string | null
   readOnly?: boolean
   /** Language for code blocks created from the slash menu or by typing ```. */
@@ -53,9 +58,10 @@ const fromEditorMarkdown = (markdown: string) => restoreFrontMatter(restoreEquat
 const yamlLanguage = languages.find(({ name }) => name === 'YAML')
 const frontMatterLanguage = yamlLanguage
   && LanguageDescription.of({ name: FRONT_MATTER_LANGUAGE, load: () => yamlLanguage.load() })
+const editingCodeBlock = () => document.activeElement?.closest('.milkdown-code-block') ?? null
 
 export default function WysiwygEditor({
-  markdown, documentPath = null, readOnly = false, codeLanguage = '', onChange, onNotice, onReady,
+  markdown, documentId = 0, documentPath = null, readOnly = false, codeLanguage = '', onChange, onNotice, onReady,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<Crepe | null>(null)
@@ -67,6 +73,11 @@ export default function WysiwygEditor({
   const readOnlyRef = useRef(readOnly)
   const codeLanguageRef = useRef(codeLanguage)
   const latestMarkdownRef = useRef(markdown)
+  /** The text the editor last reported or was given; the parent passing it back is not a change. */
+  const reportedRef = useRef(markdown)
+  /** The document whose text the editor shows, compared with `documentId` to tell a new document from an update. */
+  const documentIdRef = useRef(documentId)
+  const latestDocumentIdRef = useRef(documentId)
   const editorMarkdownRef = useRef(toEditorMarkdown(markdown))
   const suppressedMarkdownRef = useRef<string | null>(
     fromEditorMarkdown(editorMarkdownRef.current),
@@ -75,6 +86,8 @@ export default function WysiwygEditor({
   // document must map back to the file content instead of being reported as an edit.
   const pristineRef = useRef<{ source: string; canonical: string } | null>(null)
   const sourceTreeRef = useRef<{ markdown: string; tree: MarkdownBlock } | null>(null)
+  const replaceRef = useRef<(editorMarkdown: string, source: string, keepPosition: boolean) => void>(() => undefined)
+  const linkHintRef = useRef(0)
   const [failed, setFailed] = useState(false)
 
   onChangeRef.current = onChange
@@ -84,6 +97,7 @@ export default function WysiwygEditor({
   readOnlyRef.current = readOnly
   codeLanguageRef.current = codeLanguage
   latestMarkdownRef.current = markdown
+  latestDocumentIdRef.current = documentId
 
   const rememberPristine = (crepe: Crepe, source: string) => {
     pristineRef.current = { source, canonical: fromEditorMarkdown(crepe.getMarkdown()) }
@@ -92,9 +106,12 @@ export default function WysiwygEditor({
     const restored = fromEditorMarkdown(editorMarkdown)
     return restored === pristineRef.current?.canonical ? pristineRef.current.source : restored
   }
-  /** Block positions of the source text, parsed by the editor's own remark pipeline so blocks match its nodes. */
+  /**
+   * Block positions of the source text, parsed by the editor's own remark pipeline so blocks match its nodes.
+   * Delimiters are normalised first (line numbers stay the same) because `\[…\]` math is one block in the editor.
+   */
   const sourceTree = (ctx: Ctx, source: string) => {
-    const markdown = prepareFrontMatter(source)
+    const markdown = normalizeMathDelimiters(prepareFrontMatter(source))
     if (sourceTreeRef.current?.markdown !== markdown) {
       sourceTreeRef.current = { markdown, tree: ctx.get(remarkCtx).parse(markdown) as unknown as MarkdownBlock }
     }
@@ -106,6 +123,7 @@ export default function WysiwygEditor({
     if (!root) return
 
     let disposed = false
+    let createFailed = false
     const initialMarkdown = toEditorMarkdown(latestMarkdownRef.current)
     editorMarkdownRef.current = initialMarkdown
     suppressedMarkdownRef.current = fromEditorMarkdown(initialMarkdown)
@@ -194,9 +212,10 @@ export default function WysiwygEditor({
           previewOnlyByDefault: true,
           languages: [...languages, mermaidLanguage, ...(frontMatterLanguage ? [frontMatterLanguage] : [])],
           renderPreview: (language, content, applyPreview) => isMermaidLanguage(language) && content.trim()
-            ? renderMermaidPreview(content, applyPreview)
+            ? renderMermaidPreview(content, applyPreview, editingCodeBlock())
             : null,
           copyText: '复制',
+          onCopy: () => notify('代码已复制到剪贴板'),
           previewToggleText: (previewOnly) => previewOnly ? '编辑' : '隐藏',
           previewLabel: '预览',
           previewLoading: '正在渲染图表…',
@@ -224,7 +243,10 @@ export default function WysiwygEditor({
       }))
     })
     keepInlineBreaks(crepe.editor)
+    preserveLinkDefinitions(crepe.editor)
+    keepLatexFences(crepe.editor)
     applyDefaultCodeLanguage(crepe.editor, () => codeLanguageRef.current)
+    guardReadOnly(crepe.editor)
     crepe.setReadonly(readOnlyRef.current)
     installImagePlugins(crepe.editor, {
       resolve: (source) => resolveImageSource(source, documentPathRef.current),
@@ -239,51 +261,88 @@ export default function WysiwygEditor({
       }),
     })
     crepeRef.current = crepe
+    const report = (sourceMarkdown: string) => {
+      latestMarkdownRef.current = sourceMarkdown
+      reportedRef.current = sourceMarkdown
+      onChangeRef.current(sourceMarkdown)
+    }
     const publishCurrentMarkdown = () => {
       if (!readyRef.current) return
       const currentMarkdown = crepe.getMarkdown()
       editorMarkdownRef.current = currentMarkdown
       const sourceMarkdown = toSourceMarkdown(currentMarkdown)
       if (sourceMarkdown === latestMarkdownRef.current) return
-      latestMarkdownRef.current = sourceMarkdown
       suppressedMarkdownRef.current = null
-      onChangeRef.current(sourceMarkdown)
+      report(sourceMarkdown)
     }
     crepe.on((listener) => {
       listener.markdownUpdated((_ctx, nextMarkdown) => {
         editorMarkdownRef.current = nextMarkdown
         const sourceMarkdown = toSourceMarkdown(nextMarkdown)
-        latestMarkdownRef.current = sourceMarkdown
         decorateEquations()
         if (suppressedMarkdownRef.current === sourceMarkdown) {
           suppressedMarkdownRef.current = null
+          latestMarkdownRef.current = sourceMarkdown
           return
         }
         suppressedMarkdownRef.current = null
-        onChangeRef.current(sourceMarkdown)
+        report(sourceMarkdown)
       })
       listener.blur(publishCurrentMarkdown)
     })
+
+    const scroller = () => root.closest<HTMLElement>('.visual-pane')
+    replaceRef.current = (editorMarkdown, source, keepPosition) => {
+      const pane = scroller()
+      let anchor: ViewAnchor | null = null
+      let hadFocus = false
+      if (keepPosition && pane) {
+        crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx)
+          hadFocus = view.hasFocus()
+          const { markdown: previous, tree } = sourceTree(ctx, toSourceMarkdown(editorMarkdownRef.current))
+          anchor = visualAnchor(view, tree, previous, pane.getBoundingClientRect())
+        })
+      }
+      suppressedMarkdownRef.current = fromEditorMarkdown(editorMarkdown)
+      editorMarkdownRef.current = editorMarkdown
+      // Read-only code blocks refuse new text, so a reload in reading mode would keep showing the old code.
+      const readonly = crepe.readonly
+      if (readonly) crepe.setReadonly(false)
+      crepe.editor.action(replaceAll(editorMarkdown, true))
+      if (readonly) crepe.setReadonly(true)
+      rememberPristine(crepe, source)
+      const target = anchor
+      if (!target || !pane) return
+      crepe.editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx)
+        const { markdown: next, tree } = sourceTree(ctx, source)
+        revealAnchor(view, tree, next, target, pane)
+        if (!hadFocus || !view.editable) return
+        const { scrollTop } = pane
+        view.focus()
+        pane.scrollTop = scrollTop
+      })
+    }
 
     void crepe.create().then(() => {
       if (disposed) return
       readyRef.current = true
       if (crepe.readonly !== readOnlyRef.current) crepe.setReadonly(readOnlyRef.current)
-      const editor = root.querySelector<HTMLElement>('.ProseMirror')
-      editor?.setAttribute('aria-label', 'Markdown 所见即所得编辑器')
-      editor?.setAttribute('role', 'textbox')
-      editor?.setAttribute('aria-multiline', 'true')
-      editor?.setAttribute('aria-readonly', String(readOnlyRef.current))
+      crepe.editor.action((ctx) => {
+        const editor = ctx.get(editorViewCtx).dom
+        editor.setAttribute('aria-label', 'Markdown 所见即所得编辑器')
+        editor.setAttribute('role', 'textbox')
+        editor.setAttribute('aria-multiline', 'true')
+        editor.setAttribute('aria-readonly', String(readOnlyRef.current))
+      })
       decorateEquations()
 
       const latest = toEditorMarkdown(latestMarkdownRef.current)
-      if (latest !== editorMarkdownRef.current) {
-        suppressedMarkdownRef.current = fromEditorMarkdown(latest)
-        editorMarkdownRef.current = latest
-        crepe.editor.action(replaceAll(latest, true))
-      }
-      rememberPristine(crepe, latestMarkdownRef.current)
-      const scroller = () => root.closest<HTMLElement>('.visual-pane')
+      reportedRef.current = latestMarkdownRef.current
+      documentIdRef.current = latestDocumentIdRef.current
+      if (latest !== editorMarkdownRef.current) replaceRef.current(latest, latestMarkdownRef.current, false)
+      else rememberPristine(crepe, latestMarkdownRef.current)
       onReadyRef.current?.({
         insertImages: () => void chooseAndInsert(crepe.editor.action((ctx) => ctx.get(editorViewCtx))),
         flush: publishCurrentMarkdown,
@@ -306,6 +365,7 @@ export default function WysiwygEditor({
         }),
       })
     }).catch(() => {
+      createFailed = true
       if (!disposed) setFailed(true)
     })
 
@@ -315,23 +375,23 @@ export default function WysiwygEditor({
       publishCurrentMarkdown()
       readyRef.current = false
       crepeRef.current = null
+      replaceRef.current = () => undefined
       equationObserver.disconnect()
       if (decorationFrame !== null) cancelAnimationFrame(decorationFrame)
-      void crepe.destroy()
+      // Milkdown keeps retrying destroy() every 50 ms until creation finishes, which never happens after a failure.
+      if (!createFailed) void crepe.destroy()
     }
   }, [])
 
   useEffect(() => {
-    const crepe = crepeRef.current
-    if (!crepe || !readyRef.current) return
+    const sameDocument = documentIdRef.current === documentId
+    documentIdRef.current = documentId
+    if (!crepeRef.current || !readyRef.current || markdown === reportedRef.current) return
+    reportedRef.current = markdown
     const nextMarkdown = toEditorMarkdown(markdown)
     if (nextMarkdown === editorMarkdownRef.current) return
-
-    suppressedMarkdownRef.current = fromEditorMarkdown(nextMarkdown)
-    editorMarkdownRef.current = nextMarkdown
-    crepe.editor.action(replaceAll(nextMarkdown, true))
-    rememberPristine(crepe, markdown)
-  }, [markdown])
+    replaceRef.current(nextMarkdown, markdown, sameDocument)
+  }, [documentId, markdown])
 
   useEffect(() => {
     const crepe = crepeRef.current
@@ -344,13 +404,21 @@ export default function WysiwygEditor({
       // A selected image would keep its edit toolbar open.
       const { selection } = view.state
       if (selection instanceof NodeSelection) view.dispatch(view.state.tr.setSelection(TextSelection.near(selection.$from)))
-      view.dom.blur()
+      // Focus may sit inside a code block's CodeMirror rather than on the editor itself.
+      const focused = document.activeElement
+      if (focused instanceof HTMLElement && hostRef.current?.contains(focused)) focused.blur()
     })
   }, [readOnly])
 
+  /** Reading mode follows links on click; while editing a click places the caret and Ctrl+click follows the link. */
   const openExternalLink = (event: MouseEvent<HTMLDivElement>) => {
     const link = (event.target as Element).closest<HTMLAnchorElement>('a[href]')
     if (!link) return
+    if (!readOnly && !event.ctrlKey && !event.metaKey) {
+      if (Date.now() - linkHintRef.current > 10_000) onNoticeRef.current?.('按住 Ctrl 单击可打开链接')
+      linkHintRef.current = Date.now()
+      return
+    }
     const href = link.getAttribute('href')
     if (href?.startsWith('#eq-')) {
       event.preventDefault()

@@ -13,6 +13,8 @@ const compareNames = (left: string, right: string) =>
 export interface ScanLimits {
   maxFiles: number
   maxDepth: number
+  /** Bounds the walk through folders without Markdown, such as a drive root or a user profile. */
+  maxDirectories?: number
 }
 
 export function isWorkspaceRoot(value: unknown): value is string {
@@ -21,13 +23,16 @@ export function isWorkspaceRoot(value: unknown): value is string {
 
 export async function scanWorkspace(
   root: string,
-  limits: ScanLimits = { maxFiles: 2_000, maxDepth: 8 },
+  limits: ScanLimits = { maxFiles: 2_000, maxDepth: 8, maxDirectories: 5_000 },
 ): Promise<WorkspaceSnapshot> {
   if (!isWorkspaceRoot(root) || !(await stat(root)).isDirectory()) throw new Error('文件夹不存在或无法访问')
+  const maxDirectories = limits.maxDirectories ?? Number.POSITIVE_INFINITY
   let fileCount = 0
+  let directoryCount = 0
   let truncated = false
 
   const visit = async (directory: string, depth: number): Promise<WorkspaceEntry[]> => {
+    directoryCount += 1
     let dirents
     try {
       dirents = await readdir(directory, { withFileTypes: true })
@@ -41,7 +46,7 @@ export async function scanWorkspace(
       if (dirent.name.startsWith('.') || SKIPPED_DIRECTORIES.has(dirent.name)) continue
       const entryPath = path.join(directory, dirent.name)
       if (dirent.isDirectory()) {
-        if (depth >= limits.maxDepth) {
+        if (depth >= limits.maxDepth || fileCount >= limits.maxFiles || directoryCount >= maxDirectories) {
           truncated = true
           continue
         }

@@ -24,8 +24,11 @@ const preserveEmptyLines = $remark('inkdownPreserveEmptyLine', () => () => (tree
   removeEmptyLineMarkers(tree as unknown as MarkdownNode)
 })
 
-/** Milkdown's own plugin deletes every `<br>`, so line breaks in Typora and GitHub tables were lost on save. */
+/**
+ * Milkdown's own plugin deletes every `<br>`, so line breaks in Typora and GitHub tables were lost on save. Only its
+ * transform is replaced: the paragraph serializer writes empty paragraphs as `<br />` only while its options exist.
+ */
 export function keepInlineBreaks(editor: Editor): void {
-  void editor.remove(remarkPreserveEmptyLinePlugin)
+  void editor.remove(remarkPreserveEmptyLinePlugin.plugin)
   editor.use(preserveEmptyLines)
 }

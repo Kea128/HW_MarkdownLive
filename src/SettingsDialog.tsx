@@ -39,6 +39,8 @@ function changes(current: Preferences, next: Preferences): Partial<Preferences> 
 
 export function SettingsDialog({ documentPath, preferences, initialSection = 'appearance', onClose, onSave, onSaved }: Props) {
   const [section, setSection] = useState<SettingsSection>(initialSection)
+  // Only what is changed here is saved, so a theme or spell check toggled from the menu meanwhile is kept.
+  const [opened] = useState(preferences)
   const [draft, setDraft] = useState(preferences)
   const [custom, setCustom] = useState(
     preferences.imageFolder.mode === 'custom' ? preferences.imageFolder.template : CUSTOM_PLACEHOLDER,
@@ -70,7 +72,7 @@ export function SettingsDialog({ documentPath, preferences, initialSection = 'ap
       setSection('images')
       return
     }
-    const patch = changes(preferences, { ...draft, imageFolder: { mode: imageFolder.mode, template: imageFolder.template.trim() } })
+    const patch = changes(opened, { ...draft, imageFolder: { mode: imageFolder.mode, template: imageFolder.template.trim() } })
     if (Object.keys(patch).length === 0) {
       onClose()
       return
@@ -87,9 +89,23 @@ export function SettingsDialog({ documentPath, preferences, initialSection = 'ap
   }
 
   const keyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== 'Escape') return
-    event.preventDefault()
-    onClose()
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      onClose()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = [...event.currentTarget.querySelectorAll<HTMLElement>('input, select, textarea, button, [tabindex="0"]')]
+      .filter((element) => !element.matches(':disabled') && element.offsetParent !== null)
+    const first = focusable[0]
+    const last = focusable.at(-1)
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === event.currentTarget)) {
+      event.preventDefault()
+      last?.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first?.focus()
+    }
   }
 
   const tabKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -112,7 +128,7 @@ export function SettingsDialog({ documentPath, preferences, initialSection = 'ap
 
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section ref={dialogRef} className="app-dialog settings-dialog" role="dialog" aria-modal="true"
+      <section ref={dialogRef} className="app-dialog settings-dialog" role="dialog" aria-modal="true" tabIndex={-1}
         aria-labelledby="settings-title" onKeyDown={keyDown}>
         <header>
           <h2 id="settings-title">设置</h2>

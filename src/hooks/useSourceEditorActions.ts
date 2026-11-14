@@ -1,5 +1,7 @@
 import { useCallback, type RefObject } from 'react'
-import { insertMarkdown, insertMarkdownBlock, setMarkdownHeading } from '../utils'
+import {
+  indentLines, insertMarkdown, insertMarkdownBlock, setMarkdownHeading, toggleLinePrefix, type LinePrefix,
+} from '../utils'
 
 interface Options {
   editorRef: RefObject<HTMLTextAreaElement | null>
@@ -65,6 +67,16 @@ export function useSourceEditorActions({ editorRef, content, updateContent }: Op
     if (range) applyResult(insertMarkdownBlock(content, ...range, prefix, suffix, placeholder))
   }, [applyResult, content, selection])
 
+  const applyLinePrefix = useCallback((kind: LinePrefix, placeholder: string) => {
+    const range = selection()
+    if (range) applyResult(toggleLinePrefix(content, ...range, kind, placeholder))
+  }, [applyResult, content, selection])
+
+  const indent = useCallback((outdent: boolean) => {
+    const range = selection()
+    if (range) applyResult(indentLines(content, ...range, outdent))
+  }, [applyResult, content, selection])
+
   const insertLiteral = useCallback((text: string) => {
     const range = selection()
     if (!range) return
@@ -76,5 +88,5 @@ export function useSourceEditorActions({ editorRef, content, updateContent }: Op
     })
   }, [applyResult, content, selection])
 
-  return { applyFormat, applyHeading, applyBlockFormat, insertLiteral }
+  return { applyFormat, applyHeading, applyBlockFormat, applyLinePrefix, indent, insertLiteral }
 }

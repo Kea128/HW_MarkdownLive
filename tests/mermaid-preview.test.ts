@@ -97,6 +97,20 @@ describe('Mermaid 图表预览', () => {
     expect(mermaid.render).not.toHaveBeenCalled()
   })
 
+  it('在代码块里连续输入时只渲染停顿后的内容，不同代码块互不影响', async () => {
+    const { renderMermaidPreview } = await loadPreview()
+    const block = document.createElement('div')
+    const other = document.createElement('div')
+    const applied: string[] = []
+    for (const source of ['graph TD\n  A', 'graph TD\n  A-', 'graph TD\n  A-->B']) {
+      expect(renderMermaidPreview(source, () => applied.push(source), block)).toBeUndefined()
+    }
+    renderMermaidPreview('pie\n  "X" : 1', () => applied.push('other'), other)
+    expect(mermaid.render).not.toHaveBeenCalled()
+    await vi.waitFor(() => expect(applied.sort()).toEqual(['graph TD\n  A-->B', 'other']))
+    expect(mermaid.render).toHaveBeenCalledTimes(4)
+  })
+
   it('渲染失败时显示错误，后续图表仍可继续渲染', async () => {
     const { renderMermaidPreview } = await loadPreview()
     mermaid.render.mockRejectedValueOnce(new Error('render failed'))
