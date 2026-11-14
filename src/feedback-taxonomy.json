@@ -19,7 +19,7 @@
   "tags": [
     { "id": "crash", "label": "崩溃/无响应", "keywords": ["崩溃", "闪退", "无响应", "卡死", "白屏", "crash", "freeze", "hang"] },
     { "id": "data-loss", "label": "内容丢失", "keywords": ["丢失", "没保存", "未保存", "内容没了", "lost"] },
-    { "id": "slow", "label": "卡顿/慢", "keywords": ["卡顿", "很慢", "太慢", "延迟", "lag", "slow"] },
+    { "id": "slow", "label": "卡顿/慢", "keywords": ["卡顿", "很慢", "太慢", "变慢", "响应慢", "反应慢", "有延迟", "延迟高", "输入延迟", "lag", "slow"] },
     { "id": "layout", "label": "排版/样式", "keywords": ["排版", "样式", "间距", "行距", "宽度", "太窄", "太宽", "重叠", "覆盖", "对齐", "layout", "overlap"] },
     { "id": "formula", "label": "公式", "keywords": ["公式", "katex", "latex", "数学"] },
     { "id": "mermaid", "label": "图表", "keywords": ["mermaid", "流程图", "时序图", "图表"] },

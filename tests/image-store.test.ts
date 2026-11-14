@@ -8,6 +8,7 @@ import {
 import { SettingsStore } from '../electron/main/settings-store'
 import type { ImageFolderSetting } from '../src/contracts'
 import { isImageFolderSetting, validateFolderTemplate } from '../src/image-folder'
+import { DEFAULT_PREFERENCES } from '../src/preferences'
 
 const assetsFolder: ImageFolderSetting = { mode: 'document-assets', template: '${filename}.assets' }
 const nameFolder: ImageFolderSetting = { mode: 'document-name', template: '${filename}' }
@@ -144,16 +145,27 @@ describe('保存文档时整理图片', () => {
     expect(await readdir(path.join(notes, '周报 1.assets'))).toEqual(['a.png'])
   })
 
-  it('在设置中保存并校验图片保存位置', async () => {
+  it('在设置中保存并校验图片保存位置，旧版设置自动迁移', async () => {
     const { root } = await workspace()
     const file = path.join(root, 'settings.json')
     const store = new SettingsStore(file)
     await store.load()
-    await store.update({ imageFolder: { mode: 'custom', template: ' images/${filename} ' } })
-    expect((await new SettingsStore(file).load()).imageFolder).toEqual({ mode: 'custom', template: 'images/${filename}' })
+    expect(store.get().preferences).toEqual(DEFAULT_PREFERENCES)
+    await store.update({
+      preferences: { ...store.get().preferences, imageFolder: { mode: 'custom', template: ' images/${filename} ' } },
+    })
+    expect((await new SettingsStore(file).load()).preferences.imageFolder)
+      .toEqual({ mode: 'custom', template: 'images/${filename}' })
     await writeFile(file, JSON.stringify({ recentFiles: [], imageFolder: 'document-name' }), 'utf8')
-    expect((await new SettingsStore(file).load()).imageFolder).toEqual(nameFolder)
+    expect((await new SettingsStore(file).load()).preferences.imageFolder).toEqual(nameFolder)
     await writeFile(file, JSON.stringify({ recentFiles: [], imageFolder: { mode: 'custom', template: 'a|b' } }), 'utf8')
-    expect((await new SettingsStore(file).load()).imageFolder).toBeUndefined()
+    expect((await new SettingsStore(file).load()).preferences.imageFolder).toEqual(assetsFolder)
+    await writeFile(file, JSON.stringify({
+      recentFiles: [], imageFolder: 'document-name', preferences: { theme: 'dark', spellcheck: 'yes', imageFolder: sharedFolder },
+    }), 'utf8')
+    expect((await new SettingsStore(file).load()).preferences)
+      .toMatchObject({ theme: 'dark', spellcheck: false, imageFolder: sharedFolder })
+    await writeFile(file, '{', 'utf8')
+    expect((await new SettingsStore(file).load()).preferences).toEqual(DEFAULT_PREFERENCES)
   })
 })

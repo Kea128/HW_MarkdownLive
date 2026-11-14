@@ -2,12 +2,17 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react'
 import { LanguageDescription } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { Crepe } from '@milkdown/crepe'
-import { commandsCtx, editorViewCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core'
+import { commandsCtx, editorViewCtx, remarkCtx, remarkStringifyOptionsCtx } from '@milkdown/kit/core'
+import type { Ctx } from '@milkdown/kit/ctx'
+import { codeBlockConfig } from '@milkdown/kit/component/code-block'
 import { blockService, type BlockService } from '@milkdown/kit/plugin/block'
-import { clearTextInCurrentBlockCommand } from '@milkdown/kit/preset/commonmark'
+import { clearTextInCurrentBlockCommand, codeBlockSchema, setBlockTypeCommand } from '@milkdown/kit/preset/commonmark'
+import { NodeSelection, TextSelection } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { replaceAll } from '@milkdown/kit/utils'
 import { ResponsiveBlockService } from './block-service'
+import { applyDefaultCodeLanguage, plainTextLanguage } from './code-languages'
+import { codeTheme } from './code-theme'
 import { keepInlineBreaks } from './editor-breaks'
 import { prepareEquationMarkdown, restoreEquationMarkdown } from './equations'
 import { FRONT_MATTER_LANGUAGE, prepareFrontMatter, restoreFrontMatter } from './front-matter'
@@ -18,17 +23,25 @@ import { normalizeMathDelimiters } from './markdown'
 import { mermaidLanguage } from './mermaid-language'
 import { isMermaidLanguage, renderMermaidPreview } from './mermaid-preview'
 import { chooseImages, openImage, storeImages } from './paste-images'
+import { revealAnchor, visualAnchor, type MarkdownBlock, type ViewAnchor } from './position-sync'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
 import 'katex/dist/katex.min.css'
 
 export interface EditorApi {
   insertImages(): void
+  /** Reports edits Milkdown has not announced yet, so the source view opens on the final text. */
+  flush(): void
+  anchor(): ViewAnchor | null
+  reveal(anchor: ViewAnchor): void
 }
 
 interface Props {
   markdown: string
   documentPath?: string | null
+  readOnly?: boolean
+  /** Language for code blocks created from the slash menu or by typing ```. */
+  codeLanguage?: string
   onChange: (markdown: string) => void
   onNotice?: (message: string) => void
   onReady?: (api: EditorApi | null) => void
@@ -41,7 +54,9 @@ const yamlLanguage = languages.find(({ name }) => name === 'YAML')
 const frontMatterLanguage = yamlLanguage
   && LanguageDescription.of({ name: FRONT_MATTER_LANGUAGE, load: () => yamlLanguage.load() })
 
-export default function WysiwygEditor({ markdown, documentPath = null, onChange, onNotice, onReady }: Props) {
+export default function WysiwygEditor({
+  markdown, documentPath = null, readOnly = false, codeLanguage = '', onChange, onNotice, onReady,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<Crepe | null>(null)
   const readyRef = useRef(false)
@@ -49,6 +64,8 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
   const onNoticeRef = useRef(onNotice)
   const onReadyRef = useRef(onReady)
   const documentPathRef = useRef(documentPath)
+  const readOnlyRef = useRef(readOnly)
+  const codeLanguageRef = useRef(codeLanguage)
   const latestMarkdownRef = useRef(markdown)
   const editorMarkdownRef = useRef(toEditorMarkdown(markdown))
   const suppressedMarkdownRef = useRef<string | null>(
@@ -57,12 +74,15 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
   // Milkdown re-serializes loaded Markdown (table padding, escapes, list markers); an untouched
   // document must map back to the file content instead of being reported as an edit.
   const pristineRef = useRef<{ source: string; canonical: string } | null>(null)
+  const sourceTreeRef = useRef<{ markdown: string; tree: MarkdownBlock } | null>(null)
   const [failed, setFailed] = useState(false)
 
   onChangeRef.current = onChange
   onNoticeRef.current = onNotice
   onReadyRef.current = onReady
   documentPathRef.current = documentPath
+  readOnlyRef.current = readOnly
+  codeLanguageRef.current = codeLanguage
   latestMarkdownRef.current = markdown
 
   const rememberPristine = (crepe: Crepe, source: string) => {
@@ -71,6 +91,14 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
   const toSourceMarkdown = (editorMarkdown: string) => {
     const restored = fromEditorMarkdown(editorMarkdown)
     return restored === pristineRef.current?.canonical ? pristineRef.current.source : restored
+  }
+  /** Block positions of the source text, parsed by the editor's own remark pipeline so blocks match its nodes. */
+  const sourceTree = (ctx: Ctx, source: string) => {
+    const markdown = prepareFrontMatter(source)
+    if (sourceTreeRef.current?.markdown !== markdown) {
+      sourceTreeRef.current = { markdown, tree: ctx.get(remarkCtx).parse(markdown) as unknown as MarkdownBlock }
+    }
+    return sourceTreeRef.current
   }
 
   useEffect(() => {
@@ -138,7 +166,19 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
             math: { label: '公式' },
           },
           buildMenu: (builder) => {
-            builder.getGroup('advanced').addItem('image', {
+            const advanced = builder.getGroup('advanced')
+            const codeItem = advanced.group.items.find(({ key }) => key === 'code')
+            if (codeItem) {
+              codeItem.onRun = (ctx) => {
+                const commands = ctx.get(commandsCtx)
+                commands.call(clearTextInCurrentBlockCommand.key)
+                commands.call(setBlockTypeCommand.key, {
+                  nodeType: codeBlockSchema.type(ctx),
+                  attrs: { language: codeLanguageRef.current },
+                })
+              }
+            }
+            advanced.addItem('image', {
               label: '图片',
               icon: IMAGE_MENU_ICON,
               onRun: (ctx) => {
@@ -149,6 +189,8 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
           },
         },
         [Crepe.Feature.CodeMirror]: {
+          // Crepe merges these options into its defaults index by index; null is the only theme that keeps One Dark out.
+          theme: null as never,
           previewOnlyByDefault: true,
           languages: [...languages, mermaidLanguage, ...(frontMatterLanguage ? [frontMatterLanguage] : [])],
           renderPreview: (language, content, applyPreview) => isMermaidLanguage(language) && content.trim()
@@ -174,8 +216,16 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
       ctx.set(blockService.key, () => new ResponsiveBlockService() as unknown as BlockService)
       // Keep Typora's and GitHub's list and rule markers so saving does not rewrite untouched lines.
       ctx.update(remarkStringifyOptionsCtx, (options) => ({ ...options, bullet: '-' as const, rule: '-' as const }))
+      // Added after Crepe's merge: a shifted language list would have mixed each language's aliases into its neighbour.
+      ctx.update(codeBlockConfig.key, (config) => ({
+        ...config,
+        languages: [plainTextLanguage, ...config.languages],
+        extensions: [...config.extensions, codeTheme],
+      }))
     })
     keepInlineBreaks(crepe.editor)
+    applyDefaultCodeLanguage(crepe.editor, () => codeLanguageRef.current)
+    crepe.setReadonly(readOnlyRef.current)
     installImagePlugins(crepe.editor, {
       resolve: (source) => resolveImageSource(source, documentPathRef.current),
       store: (files) => storeImages(files, notify),
@@ -218,10 +268,12 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
     void crepe.create().then(() => {
       if (disposed) return
       readyRef.current = true
-      const editor = root.querySelector<HTMLElement>('[contenteditable="true"]')
+      if (crepe.readonly !== readOnlyRef.current) crepe.setReadonly(readOnlyRef.current)
+      const editor = root.querySelector<HTMLElement>('.ProseMirror')
       editor?.setAttribute('aria-label', 'Markdown 所见即所得编辑器')
       editor?.setAttribute('role', 'textbox')
       editor?.setAttribute('aria-multiline', 'true')
+      editor?.setAttribute('aria-readonly', String(readOnlyRef.current))
       decorateEquations()
 
       const latest = toEditorMarkdown(latestMarkdownRef.current)
@@ -231,8 +283,27 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
         crepe.editor.action(replaceAll(latest, true))
       }
       rememberPristine(crepe, latestMarkdownRef.current)
+      const scroller = () => root.closest<HTMLElement>('.visual-pane')
       onReadyRef.current?.({
         insertImages: () => void chooseAndInsert(crepe.editor.action((ctx) => ctx.get(editorViewCtx))),
+        flush: publishCurrentMarkdown,
+        anchor: () => crepe.editor.action((ctx) => {
+          const pane = scroller()
+          if (!pane || !readyRef.current) return null
+          const { markdown: source, tree } = sourceTree(ctx, toSourceMarkdown(crepe.getMarkdown()))
+          return visualAnchor(ctx.get(editorViewCtx), tree, source, pane.getBoundingClientRect())
+        }),
+        reveal: (anchor) => crepe.editor.action((ctx) => {
+          const pane = scroller()
+          if (!pane || !readyRef.current) return
+          const view = ctx.get(editorViewCtx)
+          const { markdown: source, tree } = sourceTree(ctx, latestMarkdownRef.current)
+          revealAnchor(view, tree, source, anchor, pane)
+          if (!view.editable) return
+          const { scrollTop } = pane
+          view.focus()
+          pane.scrollTop = scrollTop
+        }),
       })
     }).catch(() => {
       if (!disposed) setFailed(true)
@@ -261,6 +332,21 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
     crepe.editor.action(replaceAll(nextMarkdown, true))
     rememberPristine(crepe, markdown)
   }, [markdown])
+
+  useEffect(() => {
+    const crepe = crepeRef.current
+    if (!crepe || !readyRef.current || crepe.readonly === readOnly) return
+    crepe.setReadonly(readOnly)
+    crepe.editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx)
+      view.dom.setAttribute('aria-readonly', String(readOnly))
+      if (!readOnly) return
+      // A selected image would keep its edit toolbar open.
+      const { selection } = view.state
+      if (selection instanceof NodeSelection) view.dispatch(view.state.tr.setSelection(TextSelection.near(selection.$from)))
+      view.dom.blur()
+    })
+  }, [readOnly])
 
   const openExternalLink = (event: MouseEvent<HTMLDivElement>) => {
     const link = (event.target as Element).closest<HTMLAnchorElement>('a[href]')
@@ -293,7 +379,7 @@ export default function WysiwygEditor({ markdown, documentPath = null, onChange,
   }
 
   return (
-    <div className="visual-editor" onClick={openExternalLink}>
+    <div className={`visual-editor${readOnly ? ' is-readonly' : ''}`} onClick={openExternalLink}>
       <div ref={hostRef} />
     </div>
   )

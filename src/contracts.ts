@@ -27,13 +27,18 @@ export const IPC = {
   imageOpen: 'image:open',
   imageReveal: 'image:reveal',
   imageCopy: 'image:copy',
-  settingsGetImageFolder: 'settings:get-image-folder',
-  settingsSetImageFolder: 'settings:set-image-folder',
+  settingsGet: 'settings:get',
+  settingsSet: 'settings:set',
+  settingsChanged: 'settings:changed',
   settingsShow: 'settings:show',
 } as const
 
-export type ViewMode = 'visual' | 'source' | 'toggle'
+export type EditorMode = 'visual' | 'source' | 'reading'
+export type ViewMode = EditorMode | 'toggle'
 export type Theme = 'system' | 'light' | 'dark'
+export type LineSpacing = 'compact' | 'standard' | 'relaxed'
+export type ContentWidth = 'narrow' | 'wide' | 'full'
+export type SettingsSection = 'appearance' | 'editing' | 'startup' | 'images'
 export type DocumentCommand =
   | { action: 'new' | 'open' | 'save' | 'saveAs' | 'close' | 'insertImage' }
   | { action: 'openPath'; filePath: string }
@@ -78,6 +83,23 @@ export interface ImageFolderSetting {
   /** Folder for `custom`, relative to the document or absolute; `${filename}` is the document name. */
   template: string
 }
+
+export interface Preferences {
+  theme: Theme
+  lineSpacing: LineSpacing
+  /** Body text size in pixels for the visual and reading views. */
+  fontSize: number
+  contentWidth: ContentWidth
+  spellcheck: boolean
+  /** Language given to new code blocks; empty leaves the fence without one. */
+  codeLanguage: string
+  autoSave: boolean
+  reopenLastDocument: boolean
+  startupMode: EditorMode
+  imageFolder: ImageFolderSetting
+}
+
+export type PreferencesResult = { ok: true; value: Preferences } | { ok: false; error: string }
 
 export interface ImageInput {
   name: string
@@ -149,8 +171,9 @@ export interface InkdownApi {
     copy(src: string): Promise<boolean>
   }
   settings: {
-    getImageFolder(): Promise<ImageFolderSetting>
-    setImageFolder(setting: ImageFolderSetting): Promise<{ ok: true } | { ok: false; error: string }>
-    onShow(listener: () => void): () => void
+    get(): Promise<Preferences>
+    set(patch: Partial<Preferences>): Promise<PreferencesResult>
+    onChanged(listener: (preferences: Preferences) => void): () => void
+    onShow(listener: (section?: SettingsSection) => void): () => void
   }
 }

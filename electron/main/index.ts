@@ -19,13 +19,14 @@ import {
   type OpenDialogOptions,
 } from 'electron'
 import {
-  IPC, type FeedbackResult, type ImageSaveResult, type Theme, type UpdateState, type ViewMode, type WorkspaceSnapshot,
+  IPC, type FeedbackResult, type ImageSaveResult, type Preferences, type PreferencesResult, type Theme, type UpdateState,
+  type ViewMode, type WorkspaceSnapshot,
 } from '../../src/contracts'
-import {
-  DEFAULT_IMAGE_FOLDER, IMAGE_FOLDER_PRESETS, isImageFolderSetting, validateFolderTemplate,
-} from '../../src/image-folder'
+import { IMAGE_FOLDER_PRESETS } from '../../src/image-folder'
 import { fromImageUrl, resolveImageSource } from '../../src/image-source'
 import { createFeedbackRecord, feedbackIssueUrl, formatFeedback, validateFeedback } from '../../src/feedback'
+import { mergePreferences } from '../../src/preferences'
+import { contextMenuTemplate } from './context-menu'
 import { DocumentController } from './document-controller'
 import { appendFeedback } from './feedback-store'
 import { FileService } from './file-service'
@@ -57,14 +58,26 @@ const send = (channel: string, ...args: unknown[]) => {
 }
 
 const trustedEvent = (senderId: number) => mainWindow?.webContents.id === senderId
-const isTheme = (value: unknown): value is Theme =>
-  value === 'system' || value === 'light' || value === 'dark'
-const setAppTheme = (theme: Theme) => {
-  nativeTheme.themeSource = theme
-  send(IPC.themeChanged, theme)
+const preferences = () => settings.get().preferences
+
+function applyPreferences(next: Preferences, previous?: Preferences): void {
+  nativeTheme.themeSource = next.theme
+  if (previous && previous.theme !== next.theme) send(IPC.themeChanged, next.theme)
+  mainWindow?.webContents.session.setSpellCheckerEnabled(next.spellcheck)
   buildMenu()
-  return theme
 }
+
+async function updatePreferences(patch: unknown): Promise<PreferencesResult> {
+  const previous = preferences()
+  const result = mergePreferences(previous, patch)
+  if (!result.ok) return result
+  await settings.update({ preferences: result.value })
+  applyPreferences(result.value, previous)
+  send(IPC.settingsChanged, result.value)
+  return result
+}
+
+const setAppTheme = (theme: Theme) => updatePreferences({ theme }).then(() => preferences().theme)
 const showMessage = (options: MessageBoxOptions) =>
   mainWindow ? dialog.showMessageBox(mainWindow, options) : dialog.showMessageBox(options)
 const updateMenuLabels: Record<UpdateState['phase'], string> = {
@@ -81,7 +94,8 @@ const installKindLabels: Record<InstallKind, string> = {
 }
 const feedbackFile = () => path.join(app.getPath('userData'), 'feedback', 'feedback.jsonl')
 const stagedImages = () => path.join(app.getPath('userData'), 'pasted-images')
-const imageSetting = () => settings.get().imageFolder ?? DEFAULT_IMAGE_FOLDER
+const imageSetting = () => preferences().imageFolder
+const recoveryDraft = () => path.join(app.getPath('userData'), 'recovery-draft.json')
 const imageOptions = () => ({ documentPath: documents.current().filePath, stagingDir: stagedImages(), folder: imageSetting() })
 const localImage = (src: unknown) => {
   if (typeof src !== 'string') return null
@@ -200,6 +214,7 @@ async function createWindow(): Promise<void> {
   serveLocalImages()
   settings = new SettingsStore(path.join(app.getPath('userData'), 'settings.json'))
   await settings.load()
+  nativeTheme.themeSource = preferences().theme
   const displays = screen.getAllDisplays().map(({ workArea }) => workArea)
   const bounds = restoreBounds(settings.get().bounds, displays)
 
@@ -208,7 +223,7 @@ async function createWindow(): Promise<void> {
     minWidth: 800,
     minHeight: 560,
     show: false,
-    backgroundColor: '#f7f7f5',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1d2025' : '#f7f7f5',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -218,10 +233,12 @@ async function createWindow(): Promise<void> {
     },
   })
 
+  mainWindow.webContents.session.setSpellCheckerEnabled(preferences().spellcheck)
+
   documents = new DocumentController(
     () => mainWindow,
     new FileService(),
-    path.join(app.getPath('userData'), 'recovery-draft.json'),
+    recoveryDraft(),
     (snapshot) => {
       send(IPC.documentUpdated, snapshot)
       if (mainWindow) mainWindow.setTitle(`${snapshot.dirty ? '*' : ''}${snapshot.fileName} — Inkdown`)
@@ -303,6 +320,13 @@ function secureWindow(window: BrowserWindow): void {
     return { action: 'deny' }
   })
   window.webContents.on('will-navigate', (event) => event.preventDefault())
+  window.webContents.on('context-menu', (_event, params) => {
+    const items = contextMenuTemplate(params, {
+      replaceMisspelling: (word) => window.webContents.replaceMisspelling(word),
+      addToDictionary: (word) => window.webContents.session.addWordToSpellCheckerDictionary(word),
+    })
+    if (items.length) Menu.buildFromTemplate(items).popup({ window })
+  })
   window.webContents.session.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -336,10 +360,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.documentChanged, (event, content) => {
     if (trustedEvent(event.sender.id) && isDocumentContent(content)) documents.changed(content)
   })
-  ipcMain.handle(IPC.themeSet, (event, theme) => {
-    if (!trustedEvent(event.sender.id) || !isTheme(theme)) return nativeTheme.themeSource
-    return setAppTheme(theme)
-  })
+  ipcMain.handle(IPC.themeSet, (event, theme) =>
+    trustedEvent(event.sender.id) ? setAppTheme(theme) : nativeTheme.themeSource)
   ipcMain.handle(IPC.externalOpen, (event, url) => {
     if (!trustedEvent(event.sender.id) || !isSafeExternalUrl(url)) return false
     return shell.openExternal(url).then(() => true, () => false)
@@ -367,17 +389,9 @@ function registerIpc(): void {
     clipboard.writeImage(image)
     return true
   })
-  ipcMain.handle(IPC.settingsGetImageFolder, (event) => trustedEvent(event.sender.id) ? imageSetting() : DEFAULT_IMAGE_FOLDER)
-  ipcMain.handle(IPC.settingsSetImageFolder, async (event, value) => {
-    if (!trustedEvent(event.sender.id)) return { ok: false, error: '请求无效' }
-    if (!isImageFolderSetting(value)) {
-      const template = (value as { template?: unknown } | null)?.template
-      return { ok: false, error: (typeof template === 'string' && validateFolderTemplate(template)) || '图片文件夹设置无效' }
-    }
-    await settings.update({ imageFolder: { mode: value.mode, template: value.template.trim() } })
-    buildMenu()
-    return { ok: true }
-  })
+  ipcMain.handle(IPC.settingsGet, (event) => trustedEvent(event.sender.id) ? preferences() : null)
+  ipcMain.handle(IPC.settingsSet, (event, patch) =>
+    trustedEvent(event.sender.id) ? updatePreferences(patch) : { ok: false, error: '请求无效' })
   ipcMain.handle(IPC.feedbackSubmit, (event, input, channel) =>
     trustedEvent(event.sender.id) ? submitFeedback(input, channel) : { ok: false, error: '请求无效' })
   ipcMain.handle(IPC.feedbackOpenFolder, async (event) => {
@@ -397,8 +411,8 @@ function buildMenu(): void {
   const theme = (label: string, value: Theme): MenuItemConstructorOptions => ({
     label,
     type: 'radio',
-    checked: nativeTheme.themeSource === value,
-    click: () => setAppTheme(value),
+    checked: preferences().theme === value,
+    click: () => void setAppTheme(value),
   })
   const updatePhase = updates.state().phase
   Menu.setApplicationMenu(Menu.buildFromTemplate([
@@ -429,7 +443,7 @@ function buildMenu(): void {
               label,
               type: 'radio',
               checked: imageSetting().mode === mode,
-              click: () => void settings.update({ imageFolder: { mode, template } }).then(() => buildMenu()),
+              click: () => void updatePreferences({ imageFolder: { mode, template } }),
             })),
             {
               label: '自定义…',
@@ -437,7 +451,7 @@ function buildMenu(): void {
               checked: imageSetting().mode === 'custom',
               click: () => {
                 buildMenu()
-                send(IPC.settingsShow)
+                send(IPC.settingsShow, 'images')
               },
             },
           ],
@@ -459,6 +473,13 @@ function buildMenu(): void {
           accelerator: 'Ctrl+Shift+I',
           click: () => send(IPC.documentCommand, { action: 'insertImage' }),
         },
+        { type: 'separator' },
+        {
+          label: '拼写检查',
+          type: 'checkbox',
+          checked: preferences().spellcheck,
+          click: (item) => void updatePreferences({ spellcheck: item.checked }),
+        },
       ],
     },
     {
@@ -466,6 +487,7 @@ function buildMenu(): void {
       submenu: [
         view('切换源码', 'Ctrl+/', 'toggle'),
         view('所见即所得', 'Ctrl+1', 'visual'), view('Markdown 源码', 'Ctrl+2', 'source'),
+        view('阅读模式（只读）', 'Ctrl+3', 'reading'),
         { type: 'separator' },
         { label: '主题', submenu: [theme('跟随系统', 'system'), theme('浅色', 'light'), theme('深色', 'dark')] },
         { type: 'separator' }, { role: 'zoomIn', label: '放大' }, { role: 'zoomOut', label: '缩小' },
@@ -504,6 +526,13 @@ function showAbout(): Promise<unknown> {
     buttons: ['确定'],
     noLink: true,
   })
+}
+
+/** Skipped while a crash draft waits: opening a file deletes the draft before the user is asked to recover it. */
+function lastDocument(): string | undefined {
+  const [recent] = settings.get().recentFiles
+  if (!preferences().reopenLastDocument || !recent || existsSync(recoveryDraft())) return undefined
+  return existsSync(recent) ? recent : undefined
 }
 
 function startExternalChangeMonitor(): void {
@@ -552,7 +581,7 @@ if (!lock) {
   })
   app.whenReady().then(async () => {
     await createWindow()
-    const candidate = pendingDocumentPath ?? process.argv.find(isDocumentPath)
+    const candidate = pendingDocumentPath ?? process.argv.find(isDocumentPath) ?? lastDocument()
     pendingDocumentPath = null
     if (candidate) await documents.openPath(candidate)
   })

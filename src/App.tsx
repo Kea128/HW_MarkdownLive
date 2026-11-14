@@ -1,44 +1,42 @@
 import {
-  lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState,
+  lazy, Suspense, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type CSSProperties, type DragEvent, type KeyboardEvent,
 } from 'react'
 import {
-  Bold, Braces, CheckSquare, Code2, Eye, FilePlus2, FolderOpen, FolderTree,
+  Bold, BookOpen, Braces, CheckSquare, Code2, Eye, FilePlus2, FolderOpen, FolderTree,
   Image, Italic, Link, List, ListOrdered, MessageSquarePlus, Minus, Moon, PanelLeftClose, PanelLeftOpen,
   Quote, Save, SaveAll, Settings, Sigma, Strikethrough, Sun, Table2, Text, Workflow,
 } from 'lucide-react'
 import { createEquationLabel, getEquationDefinitions } from './equations'
 import { FeedbackDialog } from './FeedbackDialog'
 import { useDesktopDocument } from './hooks/useDesktopDocument'
+import { usePreferences } from './hooks/usePreferences'
 import { useSourceEditorActions } from './hooks/useSourceEditorActions'
 import { useWorkspace } from './hooks/useWorkspace'
 import {
   chooseImages, draggingImages, imageFiles, imageMarkdown, shouldPasteImages, storeImages, type StoredImage,
 } from './paste-images'
+import { offsetAtLine, sourceAnchor, sourceScrollTop, type SourceMetrics, type ViewAnchor } from './position-sync'
+import { contentWidthCss, LINE_SPACINGS } from './preferences'
 import { SettingsDialog } from './SettingsDialog'
 import { Sidebar, type OutlineItem, type SidebarView } from './Sidebar'
 import { readSidebarWidth, SIDEBAR_WIDTH } from './sidebar-width'
-import { getDocumentStats, type EditorMode } from './utils'
-import type { Theme, UpdateState } from './contracts'
+import { getDocumentStats } from './utils'
+import type { EditorMode, LineSpacing, SettingsSection, Theme, UpdateState } from './contracts'
 import type { EditorApi } from './WysiwygEditor'
 import './App.css'
 
 const WysiwygEditor = lazy(() => import('./WysiwygEditor'))
 const SOURCE_LINE_HEIGHT = 28
+const SOURCE_PADDING_TOP = 46
+const AUTO_SAVE_DELAY = 1_000
 const DOCUMENT_FILE = /\.(?:md|markdown|txt)$/i
 const MERMAID_SAMPLE = 'flowchart LR\n  A[开始] --> B{是否完成？}\n  B -- 是 --> C[发布]\n  B -- 否 --> D[继续修改]'
 
-const modes: Array<{ mode: EditorMode; label: string; icon: typeof Eye }> = [
-  { mode: 'visual', label: '所见即所得', icon: Eye },
-  { mode: 'source', label: '源码', icon: Text },
-]
-
-type LineSpacing = 'compact' | 'standard' | 'relaxed'
-
-const lineSpacingOptions: Array<{ value: LineSpacing; label: string }> = [
-  { value: 'compact', label: '紧凑' },
-  { value: 'standard', label: '标准' },
-  { value: 'relaxed', label: '宽松' },
+const modes: Array<{ mode: EditorMode; label: string; title: string; icon: typeof Eye }> = [
+  { mode: 'visual', label: '所见即所得', title: '所见即所得', icon: Eye },
+  { mode: 'source', label: '源码', title: '源码', icon: Text },
+  { mode: 'reading', label: '阅读', title: '阅读（只读）', icon: BookOpen },
 ]
 
 function describeUpdate(state: UpdateState): string | null {
@@ -48,11 +46,23 @@ function describeUpdate(state: UpdateState): string | null {
   return null
 }
 
+/** The narrow-window layout changes the source padding, so it is read from the textarea itself. */
+function sourceMetrics(textarea: HTMLTextAreaElement): SourceMetrics {
+  const style = getComputedStyle(textarea)
+  const lineHeight = Number.parseFloat(style.lineHeight)
+  const paddingTop = Number.parseFloat(style.paddingTop)
+  return {
+    lineHeight: lineHeight > 0 ? lineHeight : SOURCE_LINE_HEIGHT,
+    paddingTop: Number.isFinite(paddingTop) ? paddingTop : SOURCE_PADDING_TOP,
+  }
+}
+
 function App() {
   const {
     document: activeDocument, status, updateContent, newDocument, openDocument,
-    openPath, saveDocument, saveAsDocument, closeDocument,
+    openPath, saveDocument, autoSaveDocument, saveAsDocument, closeDocument,
   } = useDesktopDocument()
+  const { preferences, loaded: preferencesLoaded, update: updatePreferences } = usePreferences()
   const [mode, setMode] = useState<EditorMode>('visual')
   const [theme, setTheme] = useState<Theme>('system')
   const [updateState, setUpdateState] = useState<UpdateState>({ phase: 'idle' })
@@ -61,10 +71,12 @@ function App() {
   const [sidebarView, setSidebarView] = useState<SidebarView>('outline')
   const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null)
   const editorApi = useRef<EditorApi | null>(null)
   const modeRef = useRef(mode)
   modeRef.current = mode
+  const lastRichMode = useRef<Exclude<EditorMode, 'source'>>('visual')
+  const pendingAnchor = useRef<ViewAnchor | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const showNotice = useCallback((message: string) => {
@@ -77,12 +89,6 @@ function App() {
     setSidebarView('files')
   })
   const [currentLine, setCurrentLine] = useState(1)
-  const [lineSpacing, setLineSpacing] = useState<LineSpacing>(() => {
-    const saved = localStorage.getItem('inkdown-line-spacing')
-    return lineSpacingOptions.some(({ value }) => value === saved)
-      ? saved as LineSpacing
-      : 'standard'
-  })
   const themeRef = useRef<Theme>('system')
   const [dragging, setDragging] = useState(false)
   const editorRef = useRef<HTMLTextAreaElement>(null)
@@ -118,24 +124,62 @@ function App() {
   const insertSourceImages = async (files: File[]) => insertSourceMarkdown(await storeImages(files, showNotice))
   const insertImageRef = useRef(() => {})
   insertImageRef.current = () => {
-    if (modeRef.current === 'source') void chooseImages(showNotice).then(insertSourceMarkdown)
+    if (modeRef.current === 'reading') showNotice('阅读模式下不能编辑，按 Ctrl+1 回到所见即所得后再插入图片')
+    else if (modeRef.current === 'source') void chooseImages(showNotice).then(insertSourceMarkdown)
     else editorApi.current?.insertImages()
   }
 
-  useEffect(() => {
-    const applyTheme = (value: Theme) => {
-      themeRef.current = value
-      setTheme(value)
-      const dark = value === 'dark' || (value === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
-      document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-      document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+  const modeChosen = useRef(false)
+  // Switching between the source and rendered views keeps the caret line and its place on screen.
+  const switchMode = useCallback((requested: EditorMode | 'toggle') => {
+    modeChosen.current = true
+    const current = modeRef.current
+    const next = requested === 'toggle' ? (current === 'source' ? lastRichMode.current : 'source') : requested
+    if (next === current) return
+    if (current === 'source') {
+      const textarea = editorRef.current
+      pendingAnchor.current = textarea ? sourceAnchor(textarea, sourceMetrics(textarea)) : null
+    } else if (next === 'source') {
+      editorApi.current?.flush()
+      pendingAnchor.current = editorApi.current?.anchor() ?? null
     }
-    applyTheme('system')
-    const unMode = window.inkdown.view.onMode((nextMode) => {
-      setMode((current) => nextMode === 'toggle'
-        ? (current === 'visual' ? 'source' : 'visual')
-        : nextMode)
-    })
+    if (next !== 'source') lastRichMode.current = next
+    modeRef.current = next
+    setMode(next)
+  }, [])
+
+  useLayoutEffect(() => {
+    const anchor = pendingAnchor.current
+    const textarea = editorRef.current
+    if (mode !== 'source' || !anchor || !textarea) return
+    pendingAnchor.current = null
+    const offset = offsetAtLine(textarea.value, anchor.line)
+    textarea.focus({ preventScroll: true })
+    textarea.setSelectionRange(offset, offset)
+    textarea.scrollTop = sourceScrollTop(anchor, textarea.clientHeight, sourceMetrics(textarea))
+    if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = textarea.scrollTop
+    setCurrentLine(anchor.line)
+  }, [mode])
+
+  const editorReady = useCallback((api: EditorApi | null) => {
+    editorApi.current = api
+    const anchor = pendingAnchor.current
+    if (!api || !anchor) return
+    pendingAnchor.current = null
+    requestAnimationFrame(() => api.reveal(anchor))
+  }, [])
+
+  const applyTheme = useCallback((value: Theme) => {
+    themeRef.current = value
+    setTheme(value)
+    const dark = value === 'dark' || (value === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+  }, [])
+
+  useEffect(() => {
+    applyTheme(themeRef.current)
+    const unMode = window.inkdown.view.onMode(switchMode)
     const unTheme = window.inkdown.view.onTheme(applyTheme)
     const media = matchMedia('(prefers-color-scheme: dark)')
     const systemChanged = () => { if (themeRef.current === 'system') applyTheme('system') }
@@ -145,21 +189,37 @@ function App() {
       unTheme()
       media.removeEventListener('change', systemChanged)
     }
-  }, [])
+  }, [applyTheme, switchMode])
 
   useEffect(() => {
+    if (preferencesLoaded) applyTheme(preferences.theme)
+  }, [applyTheme, preferences.theme, preferencesLoaded])
+
+  useEffect(() => {
+    if (preferencesLoaded && !modeChosen.current) switchMode(preferences.startupMode)
+  }, [preferences.startupMode, preferencesLoaded, switchMode])
+
+  useEffect(() => {
+    if (!preferences.autoSave || !activeDocument.dirty || !activeDocument.filePath) return
+    const timer = setTimeout(() => void autoSaveDocument(), AUTO_SAVE_DELAY)
+    return () => clearTimeout(timer)
+  }, [activeDocument.content, activeDocument.dirty, activeDocument.filePath, autoSaveDocument, preferences.autoSave])
+
+  useEffect(() => {
+    // Captured before CodeMirror, whose Ctrl+/ would also comment out the current line of a code block.
     const toggleSource = (event: globalThis.KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || (event.code !== 'Slash' && event.key !== '/')) return
       event.preventDefault()
-      setMode((current) => current === 'visual' ? 'source' : 'visual')
+      event.stopPropagation()
+      switchMode('toggle')
     }
-    window.addEventListener('keydown', toggleSource)
-    return () => window.removeEventListener('keydown', toggleSource)
-  }, [])
+    window.addEventListener('keydown', toggleSource, true)
+    return () => window.removeEventListener('keydown', toggleSource, true)
+  }, [switchMode])
 
   useEffect(() => window.inkdown.updates.onState(setUpdateState), [])
   useEffect(() => window.inkdown.feedback.onShow(() => setFeedbackOpen(true)), [])
-  useEffect(() => window.inkdown.settings.onShow(() => setSettingsOpen(true)), [])
+  useEffect(() => window.inkdown.settings.onShow((section) => setSettingsSection(section ?? 'appearance')), [])
 
   const changeSidebarWidth = (width: number) => {
     setSidebarWidth(width)
@@ -222,7 +282,11 @@ function App() {
   return (
     <div
       className={`app mode-${mode} ${dragging ? 'is-dragging' : ''}`}
-      data-line-spacing={lineSpacing}
+      data-line-spacing={preferences.lineSpacing}
+      style={{
+        '--editor-font-size': `${preferences.fontSize}px`,
+        '--content-width': contentWidthCss(preferences.contentWidth),
+      } as CSSProperties}
       onDragOver={(event) => {
         if (!Array.from(event.dataTransfer.items).some((item) => item.kind === 'file' && !item.type.startsWith('image/'))) return
         event.preventDefault()
@@ -246,26 +310,25 @@ function App() {
         </nav>
         <div className="title-area" title={activeDocument.filePath ?? activeDocument.fileName}>
           <span>{activeDocument.fileName}</span>{activeDocument.dirty && <span className="dirty-dot" aria-label="未保存">●</span>}
+          {mode === 'reading' && <span className="readonly-badge">只读</span>}
         </div>
         <div className="view-actions">
-          {mode === 'visual' && (
+          {mode !== 'source' && (
             <label className="line-spacing-control" title="调整排版行间距">
               <span className="visually-hidden">行间距</span>
-              <select aria-label="行间距" value={lineSpacing} onChange={(event) => {
-                const value = event.currentTarget.value as LineSpacing
-                setLineSpacing(value)
-                localStorage.setItem('inkdown-line-spacing', value)
+              <select aria-label="行间距" value={preferences.lineSpacing} onChange={(event) => {
+                void updatePreferences({ lineSpacing: event.currentTarget.value as LineSpacing })
               }}>
-                {lineSpacingOptions.map(({ value, label }) => (
+                {LINE_SPACINGS.map(({ value, label }) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
             </label>
           )}
           <div className="mode-switcher" role="group" aria-label="编辑器视图">
-            {modes.map(({ mode: option, label, icon: Icon }) => (
+            {modes.map(({ mode: option, label, title, icon: Icon }) => (
               <button key={option} type="button" className={mode === option ? 'active' : ''}
-                aria-pressed={mode === option} aria-label={`${label}模式`} onClick={() => setMode(option)} title={label}>
+                aria-pressed={mode === option} aria-label={`${label}模式`} onClick={() => switchMode(option)} title={title}>
                 <Icon /><span className="visually-hidden">{label}</span>
               </button>
             ))}
@@ -281,7 +344,7 @@ function App() {
             }} aria-label="切换明暗主题" title={`当前主题：${theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色'}`}>
             {document.documentElement.dataset.theme === 'dark' ? <Sun /> : <Moon />}
           </button>
-          <button type="button" onClick={() => setSettingsOpen(true)} title="设置 (Ctrl+,)" aria-label="设置">
+          <button type="button" onClick={() => setSettingsSection('appearance')} title="设置 (Ctrl+,)" aria-label="设置">
             <Settings />
           </button>
           <button type="button" onClick={() => setFeedbackOpen(true)} title="意见反馈" aria-label="意见反馈">
@@ -318,7 +381,8 @@ function App() {
           <button type="button" onClick={() => applyFormat('> ', '', '引用')} title="引用" aria-label="插入引用"><Quote /></button>
           <span className="separator" />
           <button type="button" onClick={() => applyFormat('`', '`', '代码')} title="行内代码" aria-label="插入行内代码"><Braces /></button>
-          <button className="badged-tool" type="button" onClick={() => applyBlockFormat('```text\n', '\n```', '代码')}
+          <button className="badged-tool" type="button"
+            onClick={() => applyBlockFormat(`\`\`\`${preferences.codeLanguage}\n`, '\n```', '代码')}
             title="代码块" aria-label="插入代码块"><Code2 /><small>块</small></button>
           <button type="button" onClick={() => applyBlockFormat('```mermaid\n', '\n```', MERMAID_SAMPLE)}
             title="Mermaid 图表" aria-label="插入 Mermaid 图表"><Workflow /></button>
@@ -389,14 +453,15 @@ function App() {
                   event.preventDefault()
                   void insertSourceImages(files)
                 }}
-                wrap="off" spellCheck aria-label="Markdown 源码" placeholder="开始写作…" />
+                wrap="off" spellCheck={preferences.spellcheck} aria-label="Markdown 源码" placeholder="开始写作…" />
             </div>
           </section>
         ) : (
-          <section className="visual-pane" aria-label="Markdown 所见即所得区域">
+          <section className="visual-pane" aria-label={mode === 'reading' ? 'Markdown 阅读视图' : 'Markdown 所见即所得区域'}>
             <Suspense fallback={<div className="visual-editor-loading" aria-label="正在准备所见即所得编辑器" />}>
               <WysiwygEditor markdown={activeDocument.content} documentPath={activeDocument.filePath}
-                onChange={updateContent} onNotice={showNotice} onReady={(api) => { editorApi.current = api }} />
+                readOnly={mode === 'reading'} codeLanguage={preferences.codeLanguage}
+                onChange={updateContent} onNotice={showNotice} onReady={editorReady} />
             </Suspense>
           </section>
         )}
@@ -404,8 +469,9 @@ function App() {
 
       {dragging && <div className="drop-overlay">释放以打开文档</div>}
       {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
-      {settingsOpen && (
-        <SettingsDialog documentPath={activeDocument.filePath} onClose={() => setSettingsOpen(false)} onSaved={showNotice} />
+      {settingsSection && (
+        <SettingsDialog documentPath={activeDocument.filePath} preferences={preferences} initialSection={settingsSection}
+          onClose={() => setSettingsSection(null)} onSave={updatePreferences} onSaved={showNotice} />
       )}
       <footer className="statusbar" aria-live="polite">
         <div className="status-messages">

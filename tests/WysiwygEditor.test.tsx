@@ -9,12 +9,19 @@ const crepeState = vi.hoisted(() => ({
   blur: undefined as undefined | (() => void),
   action: vi.fn(),
   destroy: vi.fn(),
+  setReadonly: vi.fn(),
+  view: null as null | { dom: HTMLElement; state: { selection: object }; dispatch: () => void },
   features: {} as Record<string, boolean>,
   featureConfigs: {} as Record<string, Record<string, unknown>>,
 }))
 
 vi.mock('@milkdown/kit/utils', () => ({
   replaceAll: vi.fn((markdown: string) => ({ markdown })),
+}))
+
+vi.mock('../src/code-languages', () => ({
+  plainTextLanguage: { name: 'text', alias: ['text', 'plaintext', 'txt'] },
+  applyDefaultCodeLanguage: vi.fn(),
 }))
 
 vi.mock('../src/editor-images', () => ({
@@ -44,7 +51,14 @@ vi.mock('@milkdown/crepe', () => {
       ImageBlock: 'ImageBlock',
     }
     editor = { action: crepeState.action, config: vi.fn(), remove: vi.fn(async () => undefined), use: vi.fn() }
+    readonly = false
     private root: HTMLElement
+
+    setReadonly(value: boolean) {
+      this.readonly = value
+      crepeState.setReadonly(value)
+      return this
+    }
 
     constructor(options: {
       root: HTMLElement
@@ -70,7 +84,8 @@ vi.mock('@milkdown/crepe', () => {
 
     async create() {
       if (crepeState.rejectCreate) throw new Error('create failed')
-      this.root.innerHTML = '<div contenteditable="true"><p>初始</p></div>'
+      this.root.innerHTML = `<div class="ProseMirror" contenteditable="${!this.readonly}"><p>初始</p></div>`
+      crepeState.view = { dom: this.root.firstElementChild as HTMLElement, state: { selection: {} }, dispatch: vi.fn() }
     }
 
     getMarkdown() {
@@ -85,7 +100,10 @@ vi.mock('@milkdown/crepe', () => {
   return { Crepe: MockCrepe }
 })
 
-import WysiwygEditor from '../src/WysiwygEditor'
+import { commandsCtx } from '@milkdown/kit/core'
+import { setBlockTypeCommand } from '@milkdown/kit/preset/commonmark'
+import WysiwygEditor, { type EditorApi } from '../src/WysiwygEditor'
+import { applyDefaultCodeLanguage } from '../src/code-languages'
 import { installImagePlugins } from '../src/editor-images'
 import { toImageUrl } from '../src/image-source'
 import { renderMermaidPreview } from '../src/mermaid-preview'
@@ -97,11 +115,14 @@ describe('WysiwygEditor 生命周期', () => {
     crepeState.canonicalize = (markdown) => markdown
     crepeState.markdownUpdated = undefined
     crepeState.blur = undefined
+    crepeState.view = null
     crepeState.action.mockClear()
-    crepeState.action.mockImplementation((command?: { markdown?: string }) => {
+    crepeState.action.mockImplementation((command?: { markdown?: string } | ((ctx: { get(): unknown }) => unknown)) => {
+      if (typeof command === 'function') return command({ get: () => crepeState.view })
       if (typeof command?.markdown === 'string') crepeState.markdown = command.markdown
     })
     crepeState.destroy.mockClear()
+    crepeState.setReadonly.mockClear()
   })
 
   it('编辑器只是规范化载入的 Markdown 时不视为修改', async () => {
@@ -159,6 +180,7 @@ describe('WysiwygEditor 生命周期', () => {
     expect(renderMermaidPreview).toHaveBeenCalledWith('flowchart LR\n  A --> B', apply)
     expect(codeMirror.languages.map(({ name }) => name)).toEqual(expect.arrayContaining(['mermaid', 'frontmatter']))
     expect(codeMirror.languages.some(({ name }) => name === 'TypeScript')).toBe(true)
+    expect((crepeState.featureConfigs.CodeMirror as { theme: unknown }).theme).toBeNull()
     expect([codeMirror.copyText, codeMirror.previewToggleText(true), codeMirror.previewToggleText(false)])
       .toEqual(['复制', '编辑', '隐藏'])
     const blockEdit = crepeState.featureConfigs.BlockEdit as { blockHandle: { getOffset: () => number } }
@@ -209,5 +231,53 @@ describe('WysiwygEditor 生命周期', () => {
     const fallback = await screen.findByRole('textbox', { name: 'Markdown 源码' })
     fireEvent.change(fallback, { target: { value: '回退编辑' } })
     expect(onChange).toHaveBeenCalledWith('回退编辑')
+  })
+
+  it('阅读模式在创建前就只读，切换时不重建编辑器', async () => {
+    const { container, rerender } = render(<WysiwygEditor markdown="# 初始" readOnly onChange={vi.fn()} />)
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    expect(crepeState.setReadonly).toHaveBeenCalledWith(true)
+    expect(editor).toHaveAttribute('aria-readonly', 'true')
+    expect(container.querySelector('.visual-editor')).toHaveClass('is-readonly')
+
+    rerender(<WysiwygEditor markdown="# 初始" onChange={vi.fn()} />)
+    expect(crepeState.setReadonly).toHaveBeenLastCalledWith(false)
+    expect(editor).toHaveAttribute('aria-readonly', 'false')
+    expect(container.querySelector('.visual-editor')).not.toHaveClass('is-readonly')
+    rerender(<WysiwygEditor markdown="# 初始" readOnly onChange={vi.fn()} />)
+    expect(editor).toHaveAttribute('aria-readonly', 'true')
+    expect(crepeState.destroy).not.toHaveBeenCalled()
+  })
+
+  it('斜杠菜单和 ``` 输入按设置的默认语言创建代码块', async () => {
+    const { rerender } = render(<WysiwygEditor markdown="# 初始" codeLanguage="python" onChange={vi.fn()} />)
+    await screen.findByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    const language = vi.mocked(applyDefaultCodeLanguage).mock.calls.at(-1)![1]
+    expect(language()).toBe('python')
+
+    const blockEdit = crepeState.featureConfigs.BlockEdit as { buildMenu: (builder: unknown) => void }
+    const items: Array<{ key: string; onRun?: (ctx: unknown) => void }> = [{ key: 'code' }]
+    const addItem = vi.fn()
+    blockEdit.buildMenu({ getGroup: () => ({ group: { items }, addItem }) })
+    expect(addItem).toHaveBeenCalledWith('image', expect.objectContaining({ label: '图片' }))
+    rerender(<WysiwygEditor markdown="# 初始" codeLanguage="text" onChange={vi.fn()} />)
+    expect(language()).toBe('text')
+    const commands = { call: vi.fn() }
+    items[0].onRun?.({ get: (slice: unknown) => slice === commandsCtx ? commands : { nodes: { code_block: 'CODE_BLOCK' } } })
+    expect(commands.call).toHaveBeenLastCalledWith(setBlockTypeCommand.key, {
+      nodeType: 'CODE_BLOCK', attrs: { language: 'text' },
+    })
+  })
+
+  it('切换到源码前交出尚未通知的最新内容', async () => {
+    const onChange = vi.fn()
+    let api: EditorApi | null = null
+    render(<WysiwygEditor markdown="# 初始" onChange={onChange} onReady={(value) => { api = value }} />)
+    await screen.findByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    await waitFor(() => expect(api).not.toBeNull())
+    crepeState.markdown = '# 刚输入'
+    api!.flush()
+    expect(onChange).toHaveBeenCalledWith('# 刚输入')
+    expect(api!.anchor()).toBeNull()
   })
 })

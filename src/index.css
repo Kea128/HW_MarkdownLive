@@ -19,6 +19,18 @@
   --inline-code: #eef1f4;
   --code-bg: #f6f8fa;
   --table-stripe: #fafafa;
+  /* One Light, so code reads well on the pale code block background. */
+  --code-text: #383a42;
+  --code-comment: #7c7f87;
+  --code-keyword: #a626a4;
+  --code-name: #c8463a;
+  --code-function: #3a6fd8;
+  --code-constant: #986801;
+  --code-type: #a86f00;
+  --code-operator: #0179a8;
+  --code-string: #3f8a3e;
+  --code-selection: color-mix(in srgb, var(--accent) 22%, transparent);
+  --code-active-line: color-mix(in srgb, var(--accent) 6%, transparent);
   font-family: var(--sans);
   color: var(--text);
   background: var(--surface);
@@ -45,6 +57,18 @@
   --inline-code: #2b2b2b;
   --code-bg: #181818;
   --table-stripe: #242424;
+  /* One Dark, which Crepe used for every theme. */
+  --code-text: #abb2bf;
+  --code-comment: #7d8799;
+  --code-keyword: #c678dd;
+  --code-name: #e06c75;
+  --code-function: #61afef;
+  --code-constant: #d19a66;
+  --code-type: #e5c07b;
+  --code-operator: #56b6c2;
+  --code-string: #98c379;
+  --code-selection: color-mix(in srgb, var(--accent) 30%, transparent);
+  --code-active-line: rgba(102, 153, 255, .05);
 }
 
 * { box-sizing: border-box; }

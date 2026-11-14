@@ -39,6 +39,8 @@ describe('意见反馈', () => {
     expect(feedbackTags('打开文件夹后应用崩溃')).toEqual(['crash', 'files'])
     expect(feedbackTags('打开原始typora文件（其中包含图片位置），无法渲染图片')).toEqual(['image', 'compat'])
     expect(feedbackTags('一切正常')).toEqual([])
+    expect(feedbackTags('代码示例里写的是纯延迟模型和延迟加载')).toEqual([])
+    expect(feedbackTags('长文档输入有延迟，切换视图反应慢')).toEqual(['slow'])
   })
 
   it('生成带指纹的记录，未授权时不附带运行环境', () => {

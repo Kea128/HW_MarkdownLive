@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import {
-  IPC, type DocumentCommand, type DocumentSnapshot, type InkdownApi, type Theme, type UpdateState,
-  type ViewMode, type WorkspaceSnapshot,
+  IPC, type DocumentCommand, type DocumentSnapshot, type InkdownApi, type Preferences, type SettingsSection, type Theme,
+  type UpdateState, type ViewMode, type WorkspaceSnapshot,
 } from '../../src/contracts'
 
 function subscription<T>(channel: string, listener: (value: T) => void): () => void {
@@ -55,9 +55,10 @@ const api: InkdownApi = {
     copy: (src) => ipcRenderer.invoke(IPC.imageCopy, src),
   },
   settings: {
-    getImageFolder: () => ipcRenderer.invoke(IPC.settingsGetImageFolder),
-    setImageFolder: (setting) => ipcRenderer.invoke(IPC.settingsSetImageFolder, setting),
-    onShow: (listener) => subscription<void>(IPC.settingsShow, () => listener()),
+    get: () => ipcRenderer.invoke(IPC.settingsGet),
+    set: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch),
+    onChanged: (listener) => subscription<Preferences>(IPC.settingsChanged, listener),
+    onShow: (listener) => subscription<SettingsSection | undefined>(IPC.settingsShow, listener),
   },
 }
 

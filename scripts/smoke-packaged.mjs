@@ -91,6 +91,11 @@ try {
   if (!helpMenu.includes('检查更新…') || !helpMenu.includes('意见反馈…') || !fileMenu.includes('打开文件夹…')) {
     throw new Error(`打包版菜单不完整: ${JSON.stringify({ helpMenu, fileMenu })}`)
   }
+  const spellcheck = await app.evaluate(({ session }) => session.defaultSession.isSpellCheckerEnabled())
+  await page.getByRole('button', { name: '阅读模式' }).click()
+  const reading = await page.locator('.ProseMirror').getAttribute('contenteditable')
+  await page.getByRole('button', { name: '所见即所得模式' }).click()
+  if (spellcheck || reading !== 'false') throw new Error(`打包版拼写检查或阅读模式异常: ${JSON.stringify({ spellcheck, reading })}`)
   const folder = path.join(profile, '工作区')
   await mkdir(path.join(folder, '子目录'), { recursive: true })
   await writeFile(path.join(folder, '子目录', '笔记.md'), '# 笔记', 'utf8')
@@ -115,7 +120,7 @@ try {
   }
   console.log(JSON.stringify({
     executablePath, ...result, mermaidText: undefined, pastedImage: true, updateFeed: `github:${owner}/${repo}`,
-    helpMenu, workspace: true, updater,
+    helpMenu, workspace: true, updater, spellcheck, reading,
   }))
 } finally {
   await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)

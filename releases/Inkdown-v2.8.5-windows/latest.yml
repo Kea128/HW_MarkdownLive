@@ -1,0 +1,18 @@
+version: 2.8.5
+files:
+  - url: Inkdown-2.8.5-x64-setup.exe
+    sha512: 9zFSvupYYWfOFRvwJgRxmh74PbDpYG0xj6izpdarHxDGvDEd+6RNuHfoYIo/DKzo3PX1w6E2RdQlkHu53F5U1A==
+    size: 102643891
+path: Inkdown-2.8.5-x64-setup.exe
+sha512: 9zFSvupYYWfOFRvwJgRxmh74PbDpYG0xj6izpdarHxDGvDEd+6RNuHfoYIo/DKzo3PX1w6E2RdQlkHu53F5U1A==
+releaseDate: '2026-11-14T02:23:15.749Z'
+releaseNotes: |-
+  新增
+  • 阅读模式：点击顶栏的书本按钮或按 Ctrl+3 只读预览，可滚动、复制和打开链接，不会误改内容。
+  • 设置扩充为外观、编辑、启动、图片四页：主题、行间距、正文字号与宽度，拼写检查、代码块默认语言、自动保存，启动时打开上次的文档和启动视图。
+  • 代码块语言新增“纯文本（text）”；斜杠菜单、输入 ``` 后回车和源码工具栏新建的代码块使用设置中的默认语言。
+  • 拼写检查改为可选，默认关闭；新增右键菜单，可剪切、复制、粘贴，开启拼写检查后可选择建议或加入词典。
+  修复与改进
+  • 在源码和所见即所得之间切换时保持光标所在行和屏幕位置，代码块内精确到行。
+  • 浅色主题下代码块文字更清晰；在代码块中按 Ctrl+/ 只切换视图，不再同时注释当前行。
+  • 主题选择在下次启动时沿用；修复保存瞬间继续输入的内容可能被覆盖的问题。

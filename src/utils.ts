@@ -1,5 +1,3 @@
-export type EditorMode = 'visual' | 'source'
-
 export interface DocumentStats {
   characters: number
   words: number

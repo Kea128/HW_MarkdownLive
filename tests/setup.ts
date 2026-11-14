@@ -1,5 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { vi } from 'vitest'
+import type { Preferences } from '../src/contracts'
+import { DEFAULT_PREFERENCES } from '../src/preferences'
 
 // Node 25+ ships an experimental global localStorage that shadows jsdom's implementation.
 const { jsdom } = globalThis as typeof globalThis & { jsdom?: { window: Window } }
@@ -65,8 +67,9 @@ Object.defineProperty(window, 'inkdown', {
       copy: vi.fn(async () => true),
     },
     settings: {
-      getImageFolder: vi.fn(async () => ({ mode: 'document-assets', template: '${filename}.assets' })),
-      setImageFolder: vi.fn(async () => ({ ok: true })),
+      get: vi.fn(async () => DEFAULT_PREFERENCES),
+      set: vi.fn(async (patch: Partial<Preferences>) => ({ ok: true, value: { ...DEFAULT_PREFERENCES, ...patch } })),
+      onChanged: vi.fn(() => () => undefined),
       onShow: vi.fn(() => () => undefined),
     },
   },

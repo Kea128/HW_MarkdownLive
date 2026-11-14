@@ -91,6 +91,7 @@ export class ImageView implements NodeView {
   }
 
   selectNode(): void {
+    if (!this.#view.editable) return
     this.dom.classList.add('is-selected')
     this.#renderToolbar()
   }
@@ -292,13 +293,13 @@ export class ImageView implements NodeView {
     handle.addEventListener('pointerdown', (event) => this.#resize(event, handle, side))
     handle.addEventListener('dblclick', (event) => {
       event.preventDefault()
-      this.#commit({ ...this.#model, width: null, zoom: null })
+      if (this.#view.editable) this.#commit({ ...this.#model, width: null, zoom: null })
     })
     return handle
   }
 
   #resize(event: PointerEvent, handle: HTMLElement, side: 'left' | 'right'): void {
-    if (event.button !== 0) return
+    if (event.button !== 0 || !this.#view.editable) return
     event.preventDefault()
     handle.setPointerCapture(event.pointerId)
     const start = this.#image.getBoundingClientRect().width

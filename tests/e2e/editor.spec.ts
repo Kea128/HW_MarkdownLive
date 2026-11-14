@@ -183,6 +183,8 @@ test('真实桌面进程完成打开、编辑、预览、菜单快捷键与覆�
     await expect(editor).toHaveValue(/已直接编辑/)
     await page.keyboard.press('Control+/')
     await expect(visualEditor).toBeVisible()
+    await expect(visualEditor.locator('p').filter({ hasText: '已直接编辑' })).toBeInViewport()
+    await page.evaluate(() => { document.querySelector('.visual-pane')!.scrollTop = 0 })
     await expect(page.locator('#eq-total .katex')).not.toBeEmpty()
 
     const screenshotDirectory = path.resolve('docs', 'screenshots')
@@ -675,6 +677,7 @@ test('图片可对齐、拖动调整大小和修改说明；块手柄即时跟�
 
     await page.getByRole('button', { name: '设置' }).click()
     const settings = page.getByRole('dialog', { name: '设置' })
+    await settings.getByRole('tab', { name: '图片' }).click()
     await settings.getByRole('radio', { name: /自定义文件夹/ }).check()
     await settings.getByRole('textbox', { name: '自定义图片文件夹' }).fill('images/${filename}')
     await expect(settings.locator('.settings-preview')).toContainText('images/周报')
@@ -729,6 +732,156 @@ test('编辑保存后保留 front matter、列表与分隔线写法', async () =
     expect(saved).toContain('第一段。已修改')
     expect(saved).toContain('- 要点一\n- 要点二')
     expect(saved).toMatch(/\n---\n\n结尾。/)
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
+test('切换视图保持位置；阅读模式只读；代码块默认语言；设置在重启后保留并打开上次的文档', async () => {
+  test.setTimeout(150_000)
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-views-'))
+  const filePath = path.join(directory, '长文.md')
+  const paragraph = (index: number) => `第 ${index} 段：用于验证切换视图时保持光标与滚动位置。`
+  const lines = ['# 长文测试', '']
+  for (let index = 1; index <= 60; index++) lines.push(paragraph(index), '')
+  lines.push('```python', 'print("第一行")', 'print("第二行")', 'print("第三行")', '```', '')
+  for (let index = 61; index <= 90; index++) lines.push(paragraph(index), '')
+  lines.push('![示意图](示意图.png)', '')
+  await writeFile(path.join(directory, '示意图.png'), png(160, 80, [80, 160, 90]))
+  await writeFile(filePath, lines.join('\n'), 'utf8')
+  const profile = path.join(directory, 'profile')
+  const launch = () => electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${profile}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  let app = await launch()
+  const clickMenu = (group: string, label: string) => app.evaluate(({ Menu }, [groupLabel, itemLabel]) => {
+    const menu = Menu.getApplicationMenu()?.items.find((item) => item.label.includes(groupLabel))
+    const item = menu?.submenu?.items.find((entry) => entry.label === itemLabel)
+    item?.click?.(item, undefined, {} as Electron.KeyboardEvent)
+  }, [group, label])
+  const spellchecking = () => app.evaluate(({ session }) => session.defaultSession.isSpellCheckerEnabled())
+  try {
+    let page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    expect(await spellchecking()).toBe(false)
+    await page.evaluate((target) => window.inkdown.document.openPath(target), filePath)
+    const visual = page.getByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    const source = page.getByRole('textbox', { name: 'Markdown 源码' })
+    await expect(page.getByRole('heading', { name: '长文测试' })).toBeVisible()
+    const sourceCaret = () => source.evaluate((textarea: HTMLTextAreaElement) => {
+      const line = textarea.value.slice(0, textarea.selectionStart).split('\n').length
+      const style = getComputedStyle(textarea)
+      const top = Number.parseFloat(style.paddingTop) + (line - 1) * Number.parseFloat(style.lineHeight) - textarea.scrollTop
+      return { text: textarea.value.split('\n')[line - 1], ratio: top / textarea.clientHeight }
+    })
+    const visualRatio = (text: string) => visual.locator('p').filter({ hasText: text }).evaluate((element) => {
+      const pane = element.closest('.visual-pane')!.getBoundingClientRect()
+      return (element.getBoundingClientRect().top - pane.top) / pane.height
+    })
+
+    const fortieth = visual.locator('p').filter({ hasText: '第 40 段' })
+    await fortieth.scrollIntoViewIfNeeded()
+    await fortieth.click()
+    const visualPlace = await visualRatio('第 40 段')
+    await page.keyboard.press('Control+/')
+    await expect(source).toBeVisible()
+    const fromVisual = await sourceCaret()
+    expect(fromVisual.text).toBe(paragraph(40))
+    expect(Math.abs(fromVisual.ratio - visualPlace)).toBeLessThan(0.08)
+
+    await source.evaluate((textarea: HTMLTextAreaElement) => {
+      const offset = textarea.value.indexOf('第 75 段')
+      const style = getComputedStyle(textarea)
+      const line = textarea.value.slice(0, offset).split('\n').length
+      textarea.setSelectionRange(offset, offset)
+      textarea.scrollTop = Number.parseFloat(style.paddingTop) + (line - 1) * Number.parseFloat(style.lineHeight)
+        - textarea.clientHeight / 3
+    })
+    await page.keyboard.press('Control+/')
+    await expect(visual).toBeVisible()
+    await expect.poll(() => page.evaluate(() =>
+      window.getSelection()?.anchorNode?.parentElement?.closest('p')?.textContent ?? '')).toContain('第 75 段')
+    expect(Math.abs(await visualRatio('第 75 段') - 1 / 3)).toBeLessThan(0.08)
+
+    const codeBlock = page.locator('.milkdown-code-block').filter({ hasText: '第二行' })
+    await codeBlock.scrollIntoViewIfNeeded()
+    await codeBlock.locator('.cm-line').filter({ hasText: '第二行' }).click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Control+/')
+    await expect(source).toBeVisible()
+    expect((await sourceCaret()).text).toBe('print("第二行")')
+    await expect(source).not.toHaveValue(/# print/)
+    await page.keyboard.press('Control+/')
+    await expect(visual).toBeVisible()
+
+    await clickMenu('视图', '阅读模式（只读）')
+    await expect(page.locator('.readonly-badge')).toHaveText('只读')
+    await expect(visual).toHaveAttribute('contenteditable', 'false')
+    await expect(visual).toHaveAttribute('aria-readonly', 'true')
+    const readingText = await visual.textContent()
+    await visual.locator('p').filter({ hasText: '第 75 段' }).click()
+    await page.keyboard.type('不应写入')
+    await page.keyboard.press('Enter')
+    expect(await visual.textContent()).toBe(readingText)
+    const image = page.locator('.inkdown-image').first()
+    await image.scrollIntoViewIfNeeded()
+    await image.locator('img').click()
+    await expect(image.getByRole('toolbar', { name: '图片操作' })).toBeHidden()
+    await expect(page.locator('.milkdown-block-handle')).toBeHidden()
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+    await page.keyboard.press('Control+/')
+    await expect(source).toBeVisible()
+    await page.keyboard.press('Control+/')
+    await expect(page.locator('.readonly-badge')).toBeVisible()
+    await page.getByRole('button', { name: '所见即所得模式' }).click()
+    await expect(visual).toHaveAttribute('contenteditable', 'true')
+
+    await visual.locator('p').filter({ hasText: '第 90 段' }).click()
+    await page.keyboard.press('End')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('```')
+    await page.keyboard.press('Enter')
+    await page.keyboard.type('纯文本内容')
+    const plainBlock = page.locator('.milkdown-code-block').filter({ hasText: '纯文本内容' })
+    await expect(plainBlock.locator('.language-button')).toHaveText('text')
+    await plainBlock.locator('.language-button').click()
+    await page.locator('.language-picker .search-input').fill('text')
+    await expect(page.locator('.language-list-item').first()).toHaveText('text')
+    await page.locator('.language-picker .search-input').press('Escape')
+    await page.getByRole('heading', { name: '长文测试' }).click()
+    await page.getByTitle('保存 (Ctrl+S)').click()
+    await expect(page.getByLabel('未保存')).toHaveCount(0)
+    expect(await readFile(filePath, 'utf8')).toContain('```text\n纯文本内容\n```')
+
+    await page.getByRole('button', { name: '设置' }).click()
+    const settings = page.getByRole('dialog', { name: '设置' })
+    await settings.getByLabel('正文字号').selectOption('20')
+    await settings.getByRole('tab', { name: '编辑' }).click()
+    await settings.getByRole('checkbox', { name: /拼写检查/ }).check()
+    await settings.getByRole('tab', { name: '启动' }).click()
+    await expect(settings.getByRole('checkbox', { name: /启动时打开上次的文档/ })).toBeChecked()
+    await settings.getByLabel('启动时的视图').selectOption('reading')
+    await settings.getByRole('button', { name: '保存' }).click()
+    await expect(settings).toHaveCount(0)
+    await expect.poll(spellchecking).toBe(true)
+    expect(await visual.evaluate((element) => getComputedStyle(element).fontSize)).toBe('20px')
+    expect(await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.items.find((item) => item.label.includes('编辑'))
+      ?.submenu?.items.find((item) => item.label === '拼写检查')?.checked)).toBe(true)
+
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    app = await launch()
+    page = await app.firstWindow()
+    await page.waitForLoadState('domcontentloaded')
+    await expect(page.getByRole('heading', { name: '长文测试' })).toBeVisible()
+    await expect(page.locator('.title-area')).toContainText('长文.md')
+    await expect(page.locator('.readonly-badge')).toBeVisible()
+    expect(await spellchecking()).toBe(true)
+    expect(await page.getByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+      .evaluate((element) => getComputedStyle(element).fontSize)).toBe('20px')
   } finally {
     await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
     await new Promise((resolve) => setTimeout(resolve, 500))

@@ -31,8 +31,10 @@ export function useDesktopDocument() {
   useEffect(() => {
     const apply = (snapshot: DocumentSnapshot) => {
       applyingMainUpdate.current = true
+      // A save that finishes while newer keystrokes wait for the next sync must not roll the editor back.
+      const unsynced = !snapshot.dirty && pendingContent.current !== null && snapshot.content !== latestContent.current
       setDocument((current) => {
-        if (current.dirty && snapshot.dirty && snapshot.content !== latestContent.current) {
+        if (unsynced || (current.dirty && snapshot.dirty && snapshot.content !== latestContent.current)) {
           return { ...snapshot, content: current.content, dirty: true }
         }
         latestContent.current = snapshot.content
@@ -40,7 +42,7 @@ export function useDesktopDocument() {
       })
       setStatus(snapshot.recovered
         ? '已恢复崩溃草稿（尚未写入磁盘）'
-        : snapshot.dirty
+        : snapshot.dirty || unsynced
           ? '有未保存的更改'
           : snapshot.filePath ? `已打开 ${snapshot.fileName}` : '就绪')
       queueMicrotask(() => { applyingMainUpdate.current = false })
@@ -88,6 +90,9 @@ export function useDesktopDocument() {
   const saveDocument = useCallback(
     () => run(window.inkdown.document.save, '已保存'), [run],
   )
+  const autoSaveDocument = useCallback(
+    () => run(window.inkdown.document.save, '已自动保存'), [run],
+  )
   const saveAsDocument = useCallback(
     () => run(window.inkdown.document.saveAs, '已另存为'), [run],
   )
@@ -103,6 +108,7 @@ export function useDesktopDocument() {
     openDocument,
     openPath,
     saveDocument,
+    autoSaveDocument,
     saveAsDocument,
     closeDocument,
   }

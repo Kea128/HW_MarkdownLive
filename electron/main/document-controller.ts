@@ -139,18 +139,23 @@ export class DocumentController {
       target = result.filePath
     }
     try {
-      const images = await this.relocateImages(this.snapshot.content, this.snapshot.filePath, target)
+      const saving = this.snapshot.content
+      const images = await this.relocateImages(saving, this.snapshot.filePath, target)
       this.modifiedAt = await this.files.write(target, images.content, this.format)
+      // Text typed while the file was written stays unsaved, and still points at the staged images it was written with.
+      const editedMeanwhile = this.snapshot.content !== saving
       this.snapshot = {
         ...this.snapshot,
-        content: images.content,
+        content: editedMeanwhile ? this.snapshot.content : images.content,
         filePath: target,
         fileName: this.files.displayName(target),
-        dirty: false,
+        dirty: editedMeanwhile,
         recovered: false,
       }
-      await images.commit()
-      await this.removeDraft()
+      if (!editedMeanwhile) {
+        await images.commit()
+        await this.removeDraft()
+      }
       this.onRecent(target)
       this.publish()
       return { ok: true }
