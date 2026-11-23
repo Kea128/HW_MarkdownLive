@@ -14,7 +14,10 @@ import { ResponsiveBlockService } from './block-service'
 import { applyDefaultCodeLanguage, plainTextLanguage } from './code-languages'
 import { codeTheme } from './code-theme'
 import { keepInlineBreaks } from './editor-breaks'
-import { guardReadOnly } from './editor-guards'
+import { codeReadOnlyOverride, guardReadOnly, syncCodeReadOnly } from './editor-guards'
+import {
+  codeSearchHighlight, installSearch, moveSearch, replaceAllMatches, replaceCurrent, searchResult, setSearchQuery,
+} from './editor-search'
 import { prepareEquationMarkdown, restoreEquationMarkdown } from './equations'
 import { FRONT_MATTER_LANGUAGE, prepareFrontMatter, restoreFrontMatter } from './front-matter'
 import { IMAGE_MENU_ICON, insertImages, installImagePlugins } from './editor-images'
@@ -27,6 +30,7 @@ import { mermaidLanguage } from './mermaid-language'
 import { isMermaidLanguage, renderMermaidPreview } from './mermaid-preview'
 import { chooseImages, openImage, storeImages } from './paste-images'
 import { revealAnchor, visualAnchor, type MarkdownBlock, type ViewAnchor } from './position-sync'
+import type { SearchQuery, SearchResult } from './search'
 import '@milkdown/crepe/theme/common/style.css'
 import '@milkdown/crepe/theme/frame.css'
 import 'katex/dist/katex.min.css'
@@ -37,6 +41,13 @@ export interface EditorApi {
   flush(): void
   anchor(): ViewAnchor | null
   reveal(anchor: ViewAnchor): void
+  /** Highlights matches of `query` (or clears them) and selects the first one after the caret. */
+  search(query: SearchQuery | null): SearchResult
+  searchStep(step: 1 | -1): void
+  replace(replacement: string): void
+  replaceAll(replacement: string): number
+  selectedText(): string
+  focus(): void
 }
 
 interface Props {
@@ -50,6 +61,8 @@ interface Props {
   onChange: (markdown: string) => void
   onNotice?: (message: string) => void
   onReady?: (api: EditorApi | null) => void
+  /** Match counts while a search is active, updated as the document changes. */
+  onSearchResult?: (result: SearchResult) => void
 }
 
 const toEditorMarkdown = (markdown: string) =>
@@ -62,6 +75,7 @@ const editingCodeBlock = () => document.activeElement?.closest('.milkdown-code-b
 
 export default function WysiwygEditor({
   markdown, documentId = 0, documentPath = null, readOnly = false, codeLanguage = '', onChange, onNotice, onReady,
+  onSearchResult,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<Crepe | null>(null)
@@ -69,6 +83,8 @@ export default function WysiwygEditor({
   const onChangeRef = useRef(onChange)
   const onNoticeRef = useRef(onNotice)
   const onReadyRef = useRef(onReady)
+  const onSearchResultRef = useRef(onSearchResult)
+  const searchQueryRef = useRef<SearchQuery | null>(null)
   const documentPathRef = useRef(documentPath)
   const readOnlyRef = useRef(readOnly)
   const codeLanguageRef = useRef(codeLanguage)
@@ -93,6 +109,7 @@ export default function WysiwygEditor({
   onChangeRef.current = onChange
   onNoticeRef.current = onNotice
   onReadyRef.current = onReady
+  onSearchResultRef.current = onSearchResult
   documentPathRef.current = documentPath
   readOnlyRef.current = readOnly
   codeLanguageRef.current = codeLanguage
@@ -239,9 +256,10 @@ export default function WysiwygEditor({
       ctx.update(codeBlockConfig.key, (config) => ({
         ...config,
         languages: [plainTextLanguage, ...config.languages],
-        extensions: [...config.extensions, codeTheme],
+        extensions: [...config.extensions, codeTheme, codeSearchHighlight, codeReadOnlyOverride],
       }))
     })
+    installSearch(crepe.editor, (result) => onSearchResultRef.current?.(result))
     keepInlineBreaks(crepe.editor)
     preserveLinkDefinitions(crepe.editor)
     keepLatexFences(crepe.editor)
@@ -312,6 +330,9 @@ export default function WysiwygEditor({
       crepe.editor.action(replaceAll(editorMarkdown, true))
       if (readonly) crepe.setReadonly(true)
       rememberPristine(crepe, source)
+      // A full reload starts a fresh editor state, which forgets the active search.
+      const query = searchQueryRef.current
+      if (query) crepe.editor.action((ctx) => setSearchQuery(ctx.get(editorViewCtx), query, false))
       const target = anchor
       if (!target || !pane) return
       crepe.editor.action((ctx) => {
@@ -328,8 +349,10 @@ export default function WysiwygEditor({
     void crepe.create().then(() => {
       if (disposed) return
       readyRef.current = true
-      if (crepe.readonly !== readOnlyRef.current) crepe.setReadonly(readOnlyRef.current)
+      const switched = crepe.readonly !== readOnlyRef.current
+      if (switched) crepe.setReadonly(readOnlyRef.current)
       crepe.editor.action((ctx) => {
+        if (switched) syncCodeReadOnly(ctx.get(editorViewCtx))
         const editor = ctx.get(editorViewCtx).dom
         editor.setAttribute('aria-label', 'Markdown 所见即所得编辑器')
         editor.setAttribute('role', 'textbox')
@@ -362,6 +385,27 @@ export default function WysiwygEditor({
           const { scrollTop } = pane
           view.focus()
           pane.scrollTop = scrollTop
+        }),
+        search: (query) => crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx)
+          searchQueryRef.current = query
+          setSearchQuery(view, query)
+          return searchResult(view)
+        }),
+        searchStep: (step) => crepe.editor.action((ctx) => moveSearch(ctx.get(editorViewCtx), step)),
+        replace: (replacement) => crepe.editor.action((ctx) => void replaceCurrent(ctx.get(editorViewCtx), replacement)),
+        replaceAll: (replacement) => crepe.editor.action((ctx) => replaceAllMatches(ctx.get(editorViewCtx), replacement)),
+        selectedText: () => crepe.editor.action((ctx) => {
+          const { doc, selection } = ctx.get(editorViewCtx).state
+          return doc.textBetween(selection.from, selection.to, '\n')
+        }),
+        focus: () => crepe.editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx)
+          if (!view.editable) return
+          const pane = scroller()
+          const scrollTop = pane?.scrollTop
+          view.focus()
+          if (pane && scrollTop !== undefined) pane.scrollTop = scrollTop
         }),
       })
     }).catch(() => {
@@ -400,6 +444,7 @@ export default function WysiwygEditor({
     crepe.editor.action((ctx) => {
       const view = ctx.get(editorViewCtx)
       view.dom.setAttribute('aria-readonly', String(readOnly))
+      syncCodeReadOnly(view)
       if (!readOnly) return
       // A selected image would keep its edit toolbar open.
       const { selection } = view.state

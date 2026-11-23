@@ -88,11 +88,14 @@
   background: var(--border);
 }
 
-/* Only the name is shortened, so the unsaved dot and the read-only badge stay visible for long names. */
+/*
+ * Only the name is shortened, so the unsaved dot and the read-only badge stay visible for long names. The centred
+ * title also stops short of the ~330px of view controls on the right, which matters near the 800px minimum width.
+ */
 .title-area {
   position: absolute;
   left: 50%;
-  max-width: 32vw;
+  max-width: min(32vw, calc(100vw - 680px));
   display: flex;
   align-items: center;
   gap: 6px;
@@ -126,23 +129,34 @@
   font-weight: 600;
 }
 
+/* Every control on the right is 30px tall: the select, the segmented view switch and the icon buttons. */
 .view-actions {
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
 }
 
+.view-actions .action-divider {
+  margin: 0;
+}
+
+.app-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
 .line-spacing-control {
-  height: 28px;
+  display: flex;
   -webkit-app-region: no-drag;
 }
 
 .line-spacing-control select {
-  width: 72px;
-  height: 28px;
-  padding: 0 22px 0 9px;
+  width: 76px;
+  height: 30px;
+  padding: 0 22px 0 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted);
+  border-radius: 7px;
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
   background: var(--surface);
   font: 12px/1 var(--sans);
   cursor: pointer;
@@ -193,22 +207,39 @@ button svg {
   stroke-width: 1.8;
 }
 
+.topbar button svg {
+  width: 16px;
+  height: 16px;
+}
+
 .mode-switcher {
-  padding: 1px;
-  border-radius: 6px;
-  background: transparent;
+  height: 30px;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--subtle);
 }
 
 .mode-switcher button {
   width: 30px;
-  height: 27px;
-  padding: 0;
-  justify-content: center;
+  height: 24px;
+  border-radius: 5px;
+}
+
+.mode-switcher button:hover {
+  background: color-mix(in srgb, var(--hover) 75%, transparent);
 }
 
 .mode-switcher button.active {
-  color: var(--text);
+  color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent), 0 1px 2px rgba(24, 31, 40, .08);
+}
+
+:root[data-theme="dark"] .mode-switcher button.active {
   background: var(--hover);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .35);
 }
 
 .formatbar {
@@ -540,6 +571,8 @@ button svg {
 .visual-pane {
   min-width: 0;
   min-height: 0;
+  grid-row: 1;
+  grid-column: -2;
   overflow: auto;
 }
 
@@ -611,6 +644,188 @@ button svg {
 
 .editor-shell textarea:focus-visible {
   box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.line-numbers,
+.editor-shell textarea {
+  grid-row: 1;
+}
+
+/* The matches are painted behind the textarea, which turns transparent while there is something to show. */
+.source-search-layer {
+  position: relative;
+  grid-row: 1;
+  grid-column: 2;
+  overflow: hidden;
+  color: transparent;
+  background: var(--editor);
+  white-space: pre;
+  pointer-events: none;
+}
+
+.source-search-line {
+  position: absolute;
+  left: 0;
+}
+
+.source-search-layer mark {
+  color: transparent;
+  background: var(--search-match);
+  border-radius: 2px;
+}
+
+.source-search-layer mark.is-current {
+  background: var(--search-current);
+  box-shadow: 0 0 0 1px var(--search-ring);
+}
+
+.editor-shell.is-searching textarea {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+.search-match,
+.cm-search-match {
+  border-radius: 2px;
+  background: var(--search-match);
+}
+
+.search-current,
+.cm-search-current {
+  background: var(--search-current);
+  box-shadow: 0 0 0 1px var(--search-ring);
+}
+
+/* Shares the editor's grid cell, so it floats over the text and never over the sidebar. */
+.find-bar {
+  z-index: 8;
+  grid-row: 1;
+  grid-column: -2;
+  justify-self: end;
+  align-self: start;
+  max-width: calc(100% - 32px);
+  margin: 10px 22px 0 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px rgba(24, 31, 40, .14), 0 2px 6px rgba(24, 31, 40, .06);
+  font-size: 12px;
+}
+
+:root[data-theme="dark"] .find-bar {
+  background: var(--sidebar);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
+}
+
+.find-rows {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.find-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.find-field {
+  width: 286px;
+  min-width: 140px;
+  flex: 0 1 auto;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--editor);
+}
+
+.find-field:focus-within {
+  border-color: var(--accent);
+}
+
+.find-field.is-missing {
+  border-color: var(--danger);
+}
+
+.find-field input {
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--text);
+  background: transparent;
+  font: 13px var(--sans);
+}
+
+.find-field input::placeholder {
+  color: var(--faint);
+}
+
+.find-bar button {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  flex: none;
+  place-items: center;
+  padding: 0;
+  border-radius: 5px;
+}
+
+.find-bar button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.find-field button {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+}
+
+.find-bar button[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.find-bar button:disabled {
+  opacity: .4;
+  cursor: default;
+  background: transparent;
+}
+
+.find-bar .find-toggle {
+  width: 18px;
+  height: auto;
+  align-self: stretch;
+}
+
+.find-count {
+  min-width: 66px;
+  padding: 0 6px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.find-count.is-missing {
+  color: var(--danger);
+}
+
+.app-actions button.active {
+  color: var(--text);
+  background: var(--hover);
 }
 
 .visual-pane {

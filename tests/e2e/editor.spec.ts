@@ -970,6 +970,138 @@ test('编辑保存不改写方括号、空行、latex 代码块与链接定义�
   }
 })
 
+test('Ctrl+F 在所见即所得、代码块、源码和阅读模式查找替换；顶栏控件等高对齐', async () => {
+  test.setTimeout(90_000)
+  const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-find-'))
+  const filePath = path.join(directory, '查找.md')
+  await writeFile(filePath, [
+    '# 查找测试', '', '第一段提到 Inkdown 与 inkdown。', '', '```js', "const inkdown = 'inkdown'", '```', '',
+    ...Array.from({ length: 30 }, (_, index) => [`填充段落 ${index + 1}。`, '']).flat(),
+    '```text', 'deep inkdown block', '```', '', '最后一段：Inkdown。', '',
+  ].join('\n'), 'utf8')
+  const app = await electron.launch({
+    executablePath: existsSync(localElectron) ? localElectron : undefined,
+    args: ['.', `--user-data-dir=${path.join(directory, 'profile')}`],
+    env: { ...process.env, INKDOWN_E2E: '1' },
+  })
+  try {
+    const page = await app.firstWindow()
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    await page.waitForLoadState('domcontentloaded')
+    await page.evaluate((target) => window.inkdown.document.openPath(target), filePath)
+    const visual = page.getByRole('textbox', { name: 'Markdown 所见即所得编辑器' })
+    await expect(page.getByRole('heading', { name: '查找测试' })).toBeVisible()
+
+    const controls = await page.locator('.view-actions > :not(.action-divider)').evaluateAll((elements) =>
+      elements.map((element) => {
+        const rect = element.getBoundingClientRect()
+        return { height: Math.round(rect.height), center: rect.top + rect.height / 2 }
+      }))
+    expect(controls.map(({ height }) => height)).toEqual([30, 30, 30])
+    const centers = controls.map(({ center }) => center)
+    expect(Math.max(...centers) - Math.min(...centers)).toBeLessThan(1)
+    const icons = await page.locator('.topbar button svg').evaluateAll((elements) =>
+      [...new Set(elements.map((element) => element.getBoundingClientRect().width))])
+    expect(icons).toEqual([16])
+
+    // CodeMirror would open its own search panel for Ctrl+F inside a code block.
+    await page.locator('.milkdown-code-block .cm-content').first().click()
+    await page.keyboard.press('Control+f')
+    const bar = page.getByRole('search', { name: '查找与替换' })
+    const field = bar.getByRole('textbox', { name: '查找' })
+    await expect(field).toBeFocused()
+    await expect(page.locator('.cm-search')).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await expect(bar).toHaveCount(0)
+
+    await visual.locator('p').filter({ hasText: '第一段' }).click()
+    await page.keyboard.press('Control+Home')
+    await page.keyboard.press('Control+f')
+    await field.fill('inkdown')
+    const count = bar.locator('.find-count')
+    await expect(count).toHaveText('1/6')
+    await expect(visual.locator('.search-match')).toHaveCount(3)
+    await expect(page.locator('.milkdown-code-block').first().locator('.cm-search-match')).toHaveCount(2)
+    await page.keyboard.press('Enter')
+    await page.keyboard.press('Enter')
+    await expect(count).toHaveText('3/6')
+    await expect(page.locator('.cm-search-current')).toHaveCount(1)
+    await page.keyboard.press('F3')
+    await page.keyboard.press('F3')
+    await expect(count).toHaveText('5/6')
+    const deep = page.locator('.milkdown-code-block').filter({ hasText: 'deep inkdown block' })
+    await expect(deep.locator('.cm-search-current')).toBeInViewport()
+    await page.keyboard.press('F3')
+    await expect(count).toHaveText('6/6')
+    await expect(visual.locator('.search-current')).toBeInViewport()
+    await page.keyboard.press('Shift+F3')
+    await page.keyboard.press('F3')
+    await page.keyboard.press('F3')
+    await expect(count).toHaveText('1/6')
+
+    await page.keyboard.press('Control+h')
+    const replacement = bar.getByRole('textbox', { name: '替换为' })
+    await replacement.fill('Markdown')
+    await replacement.press('Enter')
+    await expect(count).toHaveText('1/5')
+    await expect(visual.locator('p').filter({ hasText: '第一段' })).toHaveText('第一段提到 Markdown 与 inkdown。')
+    await page.waitForTimeout(600)
+    await bar.getByRole('button', { name: /全部替换/ }).click()
+    await expect(page.getByText('已替换 5 处')).toBeVisible()
+    await expect(count).toHaveText('无结果')
+    await expect(page.locator('.milkdown-code-block').first()).toContainText("const Markdown = 'Markdown'")
+    await replacement.press('Escape')
+    await expect(bar).toHaveCount(0)
+    await expect(visual.locator('.search-match')).toHaveCount(0)
+    await page.keyboard.press('Control+Z')
+    await expect(visual.locator('p').filter({ hasText: '第一段' })).toHaveText('第一段提到 Markdown 与 inkdown。')
+    await expect(deep).toContainText('deep inkdown block')
+
+    await page.getByRole('button', { name: '源码模式' }).click()
+    const source = page.getByRole('textbox', { name: 'Markdown 源码' })
+    await expect(source).toBeVisible()
+    await page.keyboard.press('Control+f')
+    await expect(field).toHaveValue(/^inkdown$/i)
+    await expect(count).toHaveText(/\/5$/)
+    await expect(page.locator('.source-search-layer mark.is-current')).toHaveCount(1)
+    await field.press('Enter')
+    expect(await source.evaluate((element: HTMLTextAreaElement) =>
+      element.value.slice(element.selectionStart, element.selectionEnd).toLowerCase())).toBe('inkdown')
+    await page.keyboard.press('Control+h')
+    await replacement.fill('MD')
+    await bar.getByRole('button', { name: /全部替换/ }).click()
+    await expect(page.getByText('已替换 5 处')).toBeVisible()
+    expect(await source.inputValue()).not.toMatch(/inkdown/i)
+    await replacement.press('Escape')
+    await expect(source).toBeFocused()
+    await page.keyboard.press('Control+Z')
+    await expect.poll(() => source.inputValue()).toMatch(/const inkdown = 'inkdown'/)
+
+    await page.getByRole('button', { name: '阅读模式' }).click()
+    await expect(visual).toHaveAttribute('contenteditable', 'false')
+    await page.keyboard.press('Control+f')
+    await expect(count).toHaveText(/\/5$/)
+    await expect(bar.getByRole('button', { name: /替换/ })).toHaveCount(0)
+    await field.press('Enter')
+    await expect(page.locator('.search-current, .cm-search-current')).toHaveCount(1)
+
+    // Typing in a code block while searching updates both editors without update-in-progress errors.
+    await page.getByRole('button', { name: '所见即所得模式' }).click()
+    const firstBlock = page.locator('.milkdown-code-block').first()
+    await firstBlock.locator('.cm-content').click()
+    await page.keyboard.press('End')
+    await page.keyboard.type(' // inkdown')
+    await expect(count).toHaveText(/\/6$/)
+    await expect(firstBlock.locator('.cm-search-match')).toHaveCount(3)
+    expect(errors).toEqual([])
+  } finally {
+    await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => undefined)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+  }
+})
+
 test('帮助菜单提供在线检查更新入口', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'inkdown-e2e-update-'))
   const app = await electron.launch({

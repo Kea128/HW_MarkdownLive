@@ -10,7 +10,7 @@ interface Options {
 }
 
 /** Replaces only the changed span through the browser so Ctrl+Z can undo toolbar edits; assigning `value` clears history. */
-function replaceUndoably(editor: HTMLTextAreaElement, next: string): boolean {
+export function replaceUndoably(editor: HTMLTextAreaElement, next: string): boolean {
   if (typeof document.execCommand !== 'function') return false
   const current = editor.value
   if (current === next) return true

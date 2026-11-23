@@ -32,6 +32,9 @@
   --code-string: #3f8a3e;
   --code-selection: color-mix(in srgb, var(--accent) 22%, transparent);
   --code-active-line: color-mix(in srgb, var(--accent) 6%, transparent);
+  --search-match: rgba(234, 179, 8, .3);
+  --search-current: rgba(249, 115, 22, .42);
+  --search-ring: rgba(234, 88, 12, .75);
   font-family: var(--sans);
   color: var(--text);
   background: var(--surface);
@@ -70,6 +73,9 @@
   --code-string: #98c379;
   --code-selection: color-mix(in srgb, var(--accent) 30%, transparent);
   --code-active-line: rgba(102, 153, 255, .05);
+  --search-match: rgba(234, 179, 8, .24);
+  --search-current: rgba(251, 146, 60, .45);
+  --search-ring: rgba(253, 186, 116, .8);
 }
 
 * { box-sizing: border-box; }

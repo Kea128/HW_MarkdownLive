@@ -19,6 +19,12 @@ const editorApi = vi.hoisted(() => ({
   flush: vi.fn(),
   anchor: vi.fn((): { line: number; ratio: number } | null => null),
   reveal: vi.fn(),
+  search: vi.fn((_query: unknown) => ({ count: 0, current: -1 })),
+  searchStep: vi.fn(),
+  replace: vi.fn(),
+  replaceAll: vi.fn((_replacement: string) => 0),
+  selectedText: vi.fn(() => ''),
+  focus: vi.fn(),
 }))
 
 vi.mock('../src/WysiwygEditor', async () => {
@@ -200,14 +206,14 @@ describe('Inkdown 桌面编辑器', () => {
     render(<App />)
     await waitFor(() => expect(modeListener).toBeDefined())
     act(() => modeListener?.('source'))
-    expect(screen.getByTitle('源码')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTitle('源码 (Ctrl+2)')).toHaveAttribute('aria-pressed', 'true')
     act(() => modeListener?.('toggle'))
-    expect(screen.getByTitle('所见即所得')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTitle('所见即所得 (Ctrl+1)')).toHaveAttribute('aria-pressed', 'true')
     act(() => modeListener?.('reading'))
     act(() => modeListener?.('toggle'))
-    expect(screen.getByTitle('源码')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTitle('源码 (Ctrl+2)')).toHaveAttribute('aria-pressed', 'true')
     act(() => modeListener?.('toggle'))
-    expect(screen.getByTitle('阅读（只读）')).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByTitle('阅读（只读） (Ctrl+3)')).toHaveAttribute('aria-pressed', 'true')
     act(() => themeListener?.('dark'))
     expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
     await userEvent.click(screen.getByRole('button', { name: '切换明暗主题' }))
@@ -604,5 +610,108 @@ describe('Inkdown 桌面编辑器', () => {
     expect(screen.getByRole('dialog', { name: '意见反馈' })).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('源码模式 Ctrl+F 查找、F3 循环、Ctrl+H 替换与全部替换，Esc 回到正文', async () => {
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    toggleSource()
+    const editor = await screen.findByRole('textbox', { name: 'Markdown 源码' }) as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: 'alpha beta alpha\nAlpha' } })
+    editor.setSelectionRange(0, 0)
+
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    const search = screen.getByRole('search', { name: '查找与替换' })
+    const field = within(search).getByRole('textbox', { name: '查找' })
+    expect(field).toHaveFocus()
+    fireEvent.change(field, { target: { value: 'alpha' } })
+    expect(within(search).getByText('1/3')).toBeInTheDocument()
+    expect([editor.selectionStart, editor.selectionEnd]).toEqual([0, 5])
+    expect(document.querySelectorAll('.source-search-layer mark')).toHaveLength(3)
+
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(within(search).getByText('2/3')).toBeInTheDocument()
+    expect(editor.selectionStart).toBe(11)
+    fireEvent.keyDown(window, { key: 'F3', shiftKey: true })
+    expect(within(search).getByText('1/3')).toBeInTheDocument()
+    await userEvent.click(within(search).getByRole('button', { name: /区分大小写/ }))
+    expect(within(search).getByText('1/2')).toBeInTheDocument()
+
+    fireEvent.keyDown(window, { key: 'h', ctrlKey: true })
+    const replacement = within(search).getByRole('textbox', { name: '替换为' })
+    fireEvent.change(replacement, { target: { value: 'gamma' } })
+    await userEvent.click(within(search).getByRole('button', { name: '替换 (Enter)' }))
+    expect(editor.value).toBe('gamma beta alpha\nAlpha')
+    expect(within(search).getByText('1/1')).toBeInTheDocument()
+    await userEvent.click(within(search).getByRole('button', { name: /区分大小写/ }))
+    await userEvent.click(within(search).getByRole('button', { name: /全部替换/ }))
+    expect(editor.value).toBe('gamma beta gamma\ngamma')
+    expect(screen.getByText('已替换 2 处')).toBeInTheDocument()
+    expect(within(search).getByText('无结果')).toBeInTheDocument()
+
+    fireEvent.change(field, { target: { value: '(' } })
+    await userEvent.click(within(search).getByRole('button', { name: /使用正则表达式/ }))
+    expect(within(search).getByText('正则表达式无效')).toBeInTheDocument()
+    fireEvent.keyDown(field, { key: 'r', altKey: true })
+    expect(within(search).getByRole('button', { name: /使用正则表达式/ })).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.change(field, { target: { value: 'GAMMA' } })
+    fireEvent.keyDown(field, { key: 'c', altKey: true })
+    expect(within(search).getByText('无结果')).toBeInTheDocument()
+    fireEvent.keyDown(field, { key: 'w', altKey: true })
+    fireEvent.keyDown(field, { key: 'c', altKey: true })
+    expect(within(search).getByText(/^\d\/3$/)).toBeInTheDocument()
+    expect(within(search).getByRole('button', { name: /全字匹配/ })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect(screen.queryByRole('search')).not.toBeInTheDocument()
+    expect(editor).toHaveFocus()
+    expect(document.querySelector('.source-search-layer')).not.toBeInTheDocument()
+  })
+
+  it('所见即所得用选中文字作为查询，菜单命令可查找、替换；阅读模式只能查找', async () => {
+    let commandListener: ((command: DocumentCommand) => void) | undefined
+    vi.mocked(window.inkdown.document.onCommand).mockImplementation((listener) => {
+      commandListener = listener
+      return () => undefined
+    })
+    editorApi.selectedText.mockReturnValue('初始')
+    editorApi.search.mockImplementation((query) => query ? { count: 2, current: 0 } : { count: 0, current: -1 })
+    editorApi.replaceAll.mockReturnValue(2)
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+
+    act(() => commandListener?.({ action: 'find' }))
+    const search = screen.getByRole('search', { name: '查找与替换' })
+    expect(within(search).getByRole('textbox', { name: '查找' })).toHaveValue('初始')
+    expect(editorApi.search).toHaveBeenLastCalledWith(expect.objectContaining({ text: '初始' }))
+    expect(within(search).getByText('1/2')).toBeInTheDocument()
+    act(() => commandListener?.({ action: 'findNext' }))
+    act(() => commandListener?.({ action: 'findPrevious' }))
+    expect(editorApi.searchStep.mock.calls).toEqual([[1], [-1]])
+
+    editorApi.selectedText.mockReturnValue('当前匹配')
+    act(() => commandListener?.({ action: 'replace' }))
+    expect(within(search).getByRole('textbox', { name: '查找' })).toHaveValue('初始')
+    fireEvent.change(within(search).getByRole('textbox', { name: '替换为' }), { target: { value: '最终' } })
+    fireEvent.keyDown(within(search).getByRole('textbox', { name: '替换为' }), { key: 'Enter' })
+    expect(editorApi.replace).toHaveBeenCalledWith('最终')
+    fireEvent.keyDown(within(search).getByRole('textbox', { name: '替换为' }), { key: 'Enter', ctrlKey: true, altKey: true })
+    expect(editorApi.replaceAll).toHaveBeenCalledWith('最终')
+    expect(screen.getByText('已替换 2 处')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: '阅读模式' }))
+    expect(within(search).queryByRole('textbox', { name: '替换为' })).not.toBeInTheDocument()
+    expect(within(search).queryByRole('button', { name: /替换/ })).not.toBeInTheDocument()
+    await userEvent.click(within(search).getByRole('button', { name: /关闭查找/ }))
+    expect(screen.queryByRole('search')).not.toBeInTheDocument()
+    expect(editorApi.search).toHaveBeenLastCalledWith(null)
+    expect(editorApi.focus).toHaveBeenCalled()
+  })
+
+  it('对话框打开时 Ctrl+F 不抢焦点', async () => {
+    render(<App />)
+    await screen.findByRole('heading', { name: '初始文稿' })
+    await userEvent.click(screen.getByRole('button', { name: '意见反馈' }))
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true })
+    expect(screen.queryByRole('search')).not.toBeInTheDocument()
   })
 })

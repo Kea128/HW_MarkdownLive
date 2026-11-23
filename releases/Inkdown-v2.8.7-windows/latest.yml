@@ -1,0 +1,15 @@
+version: 2.8.7
+files:
+  - url: Inkdown-2.8.7-x64-setup.exe
+    sha512: +Ai7z78Zmdm61lzptXLnOr5bp4r+aKmjDx1oOQlQIFAw2fWX1CMYWcWR3AbYsxBZB+jmPQt05LdtIXXqllQr1A==
+    size: 102654963
+path: Inkdown-2.8.7-x64-setup.exe
+sha512: +Ai7z78Zmdm61lzptXLnOr5bp4r+aKmjDx1oOQlQIFAw2fWX1CMYWcWR3AbYsxBZB+jmPQt05LdtIXXqllQr1A==
+releaseDate: '2026-11-23T09:44:57.083Z'
+releaseNotes: |-
+  新增
+  • 查找与替换：Ctrl+F 查找、Ctrl+H 替换，Enter 或 F3 下一个、Shift+Enter 或 Shift+F3 上一个，Esc 关闭；可区分大小写、全字匹配或使用正则表达式（替换时可用 $1 引用分组）。所见即所得、源码和阅读模式都能查找，代码块和表格里的文字同样高亮；阅读模式只查找不替换，全部替换按一次 Ctrl+Z 即可撤销。也可从“编辑”菜单或顶栏的放大镜按钮打开。
+  改进
+  • 顶栏右侧控件统一为 30 像素高、16 像素图标：三种视图合为一组分段按钮，源码改用 &lt;/&gt; 图标，与主题、设置、反馈按钮之间加分隔线；最小窗口宽度下长文件名不再压住行间距选择框。
+  修复
+  • 从源码模式切到阅读模式、再回到所见即所得后，代码块无法输入。

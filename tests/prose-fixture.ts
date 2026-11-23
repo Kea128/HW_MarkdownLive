@@ -1,11 +1,12 @@
 import { Schema, type Node } from '@milkdown/kit/prose/model'
-import { EditorState, NodeSelection } from '@milkdown/kit/prose/state'
+import { EditorState, NodeSelection, type Plugin } from '@milkdown/kit/prose/state'
 import { EditorView, type NodeViewConstructor } from '@milkdown/kit/prose/view'
 
 export const schema = new Schema({
   nodes: {
     doc: { content: 'block+' },
     paragraph: { content: 'inline*', group: 'block', toDOM: () => ['p', 0] },
+    code_block: { content: 'text*', marks: '', group: 'block', code: true, toDOM: () => ['pre', ['code', 0]] },
     text: { group: 'inline' },
     image: {
       inline: true,
@@ -27,6 +28,7 @@ export const schema = new Schema({
 })
 
 export const paragraph = (...content: Node[]) => schema.nodes.paragraph.create(null, content)
+export const codeBlock = (value: string) => schema.nodes.code_block.create(null, value ? schema.text(value) : [])
 export const image = (src: string, alt = '') => schema.nodes.image.create({ src, alt })
 export const html = (value: string) => schema.nodes.html.create({ value })
 export const text = (value: string) => schema.text(value)
@@ -40,11 +42,13 @@ export function stubLayout(): void {
   Element.prototype.setPointerCapture = () => undefined
 }
 
-export function mountView(nodes: Node[], nodeViews: Record<string, NodeViewConstructor> = {}): EditorView {
+export function mountView(
+  nodes: Node[], nodeViews: Record<string, NodeViewConstructor> = {}, plugins: Plugin[] = [],
+): EditorView {
   const host = document.createElement('div')
   document.body.append(host)
   return new EditorView(host, {
-    state: EditorState.create({ doc: schema.nodes.doc.create(null, nodes) }),
+    state: EditorState.create({ doc: schema.nodes.doc.create(null, nodes), plugins }),
     nodeViews,
   })
 }

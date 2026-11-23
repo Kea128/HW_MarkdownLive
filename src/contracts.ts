@@ -40,7 +40,7 @@ export type LineSpacing = 'compact' | 'standard' | 'relaxed'
 export type ContentWidth = 'narrow' | 'wide' | 'full'
 export type SettingsSection = 'appearance' | 'editing' | 'startup' | 'images'
 export type DocumentCommand =
-  | { action: 'new' | 'open' | 'save' | 'saveAs' | 'close' | 'insertImage' }
+  | { action: 'new' | 'open' | 'save' | 'saveAs' | 'close' | 'insertImage' | 'find' | 'replace' | 'findNext' | 'findPrevious' }
   | { action: 'openPath'; filePath: string }
 export type UpdateState =
   | { phase: 'idle' | 'checking' }

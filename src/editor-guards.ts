@@ -1,3 +1,5 @@
+import { Compartment, EditorState as CodeState, Prec } from '@codemirror/state'
+import { EditorView as CodeView } from '@codemirror/view'
 import type { Editor } from '@milkdown/kit/core'
 import { Plugin } from '@milkdown/kit/prose/state'
 import type { EditorView } from '@milkdown/kit/prose/view'
@@ -18,4 +20,17 @@ export function guardReadOnly(editor: Editor): void {
       filterTransaction: (tr) => !tr.docChanged || view?.editable !== false,
     })
   }))
+}
+
+const codeReadOnly = new Compartment()
+
+/**
+ * A code block takes its read-only flag when its CodeMirror mounts, and Milkdown refreshes it only when the block
+ * itself changes, so blocks mounted in reading mode would stay locked after switching back to editing.
+ */
+export const codeReadOnlyOverride = codeReadOnly.of([])
+
+export function syncCodeReadOnly(view: EditorView): void {
+  const effects = codeReadOnly.reconfigure(Prec.highest(CodeState.readOnly.of(!view.editable)))
+  for (const element of view.dom.querySelectorAll<HTMLElement>('.cm-editor')) CodeView.findFromDOM(element)?.dispatch({ effects })
 }

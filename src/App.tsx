@@ -3,15 +3,16 @@ import {
   type CSSProperties, type DragEvent, type KeyboardEvent,
 } from 'react'
 import {
-  Bold, BookOpen, Braces, CheckSquare, Code2, Eye, FilePlus2, FolderOpen, FolderTree,
+  Bold, BookOpen, Braces, CheckSquare, Code2, CodeXml, FilePlus2, FolderOpen, FolderTree,
   Image, Italic, Link, List, ListOrdered, MessageSquarePlus, Minus, Moon, PanelLeftClose, PanelLeftOpen,
-  Quote, Save, SaveAll, Settings, Sigma, Strikethrough, Sun, Table2, Text, Workflow,
+  PenLine, Quote, Save, SaveAll, Search, Settings, Sigma, Strikethrough, Sun, Table2, Workflow,
 } from 'lucide-react'
 import { createEquationLabel, getEquationDefinitions } from './equations'
 import { FeedbackDialog } from './FeedbackDialog'
+import { FindBar } from './FindBar'
 import { useDesktopDocument } from './hooks/useDesktopDocument'
 import { usePreferences } from './hooks/usePreferences'
-import { useSourceEditorActions } from './hooks/useSourceEditorActions'
+import { replaceUndoably, useSourceEditorActions } from './hooks/useSourceEditorActions'
 import { useWorkspace } from './hooks/useWorkspace'
 import { markdownOutline, type OutlineItem } from './outline'
 import {
@@ -21,8 +22,13 @@ import {
   lineAtOffset, offsetAtLine, sourceAnchor, sourceScrollTop, type SourceMetrics, type ViewAnchor,
 } from './position-sync'
 import { contentWidthCss, LINE_SPACINGS } from './preferences'
+import {
+  compileQuery, EMPTY_QUERY, findMatches, matchAfter, replaceEvery, replacementAt,
+  type SearchMatch, type SearchQuery, type SearchResult,
+} from './search'
 import { SettingsDialog } from './SettingsDialog'
 import { Sidebar, type SidebarView } from './Sidebar'
+import { SourceSearchLayer } from './SourceSearchLayer'
 import { readSidebarWidth, SIDEBAR_WIDTH } from './sidebar-width'
 import { getDocumentStats } from './utils'
 import type { EditorMode, LineSpacing, SettingsSection, Theme, UpdateState } from './contracts'
@@ -36,11 +42,12 @@ const AUTO_SAVE_DELAY = 1_000
 const DOCUMENT_FILE = /\.(?:md|markdown|txt)$/i
 const MERMAID_SAMPLE = 'flowchart LR\n  A[开始] --> B{是否完成？}\n  B -- 是 --> C[发布]\n  B -- 否 --> D[继续修改]'
 
-const modes: Array<{ mode: EditorMode; label: string; title: string; icon: typeof Eye }> = [
-  { mode: 'visual', label: '所见即所得', title: '所见即所得', icon: Eye },
-  { mode: 'source', label: '源码', title: '源码', icon: Text },
-  { mode: 'reading', label: '阅读', title: '阅读（只读）', icon: BookOpen },
+const modes: Array<{ mode: EditorMode; label: string; title: string; icon: typeof PenLine }> = [
+  { mode: 'visual', label: '所见即所得', title: '所见即所得 (Ctrl+1)', icon: PenLine },
+  { mode: 'source', label: '源码', title: '源码 (Ctrl+2)', icon: CodeXml },
+  { mode: 'reading', label: '阅读', title: '阅读（只读） (Ctrl+3)', icon: BookOpen },
 ]
+const NO_RESULT: SearchResult = { count: 0, current: -1 }
 
 function describeUpdate(state: UpdateState): string | null {
   if (state.phase === 'checking') return '正在检查更新…'
@@ -105,6 +112,11 @@ function App() {
   const [dragging, setDragging] = useState(false)
   const dragDepth = useRef(0)
   const editorRef = useRef<HTMLTextAreaElement>(null)
+  const [sourceTextarea, setSourceTextarea] = useState<HTMLTextAreaElement | null>(null)
+  const attachSourceTextarea = useCallback((element: HTMLTextAreaElement | null) => {
+    editorRef.current = element
+    setSourceTextarea(element)
+  }, [])
   const lineNumbersRef = useRef<HTMLDivElement>(null)
   const sourceSelection = useRef({ start: 0, end: 0, scrollTop: 0 })
   const typedContent = useRef<string | null>(null)
@@ -137,6 +149,148 @@ function App() {
     else if (modeRef.current === 'source') void chooseImages(showNotice).then(insertSourceMarkdown)
     else editorApi.current?.insertImages()
   }
+
+  const [find, setFind] = useState({ open: false, replace: false })
+  const [query, setQuery] = useState<SearchQuery>(EMPTY_QUERY)
+  const [replacement, setReplacement] = useState('')
+  const [findFocus, setFindFocus] = useState(0)
+  const [visualSearch, setVisualSearch] = useState<SearchResult>(NO_RESULT)
+  const [sourceCurrent, setSourceCurrent] = useState(-1)
+  const [sourceScroll, setSourceScroll] = useState({ top: 0, left: 0 })
+  const findState = useRef({ open: false, query: EMPTY_QUERY })
+  findState.current = { open: find.open, query }
+  /** After a replacement the next match is the first one past the inserted text. */
+  const sourceReplaceEnd = useRef<number | null>(null)
+  const pattern = useMemo(() => compileQuery(query), [query])
+  const sourceMatches = useMemo(
+    () => find.open && mode === 'source' && pattern instanceof RegExp ? findMatches(activeDocument.content, pattern) : [],
+    [activeDocument.content, find.open, mode, pattern],
+  )
+  const sourceIndex = sourceMatches.length ? Math.min(Math.max(sourceCurrent, 0), sourceMatches.length - 1) : -1
+  const sourceSearch = useRef({ matches: sourceMatches, index: sourceIndex })
+  sourceSearch.current = { matches: sourceMatches, index: sourceIndex }
+  const searchShown: SearchResult = {
+    ...(mode === 'source' ? { count: sourceMatches.length, current: sourceIndex } : visualSearch),
+    error: typeof pattern === 'string' ? pattern : undefined,
+  }
+
+  /** Selects the match without focusing the textarea, scrolling it into the upper third when it is out of view. */
+  const revealSourceMatch = useCallback((match: SearchMatch) => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.setSelectionRange(match.start, match.end)
+    const { lineHeight, paddingTop } = sourceMetrics(editor)
+    const line = lineAtOffset(editor.value, match.start)
+    const top = paddingTop + (line - 1) * lineHeight
+    if (top < editor.scrollTop || top + lineHeight > editor.scrollTop + editor.clientHeight) {
+      editor.scrollTop = Math.max(0, top - editor.clientHeight / 3)
+    }
+    if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = editor.scrollTop
+    sourceSelection.current = { start: match.start, end: match.end, scrollTop: editor.scrollTop }
+    setSourceScroll({ top: editor.scrollTop, left: editor.scrollLeft })
+    setCurrentLine(line)
+  }, [])
+
+  const runSearch = useCallback((next: SearchQuery) => {
+    const compiled = compileQuery(next)
+    if (modeRef.current !== 'source') {
+      setVisualSearch(editorApi.current?.search(compiled instanceof RegExp ? next : null) ?? NO_RESULT)
+      return
+    }
+    const editor = editorRef.current
+    const matches = compiled instanceof RegExp && editor ? findMatches(editor.value, compiled) : []
+    const index = matchAfter(matches, editor?.selectionStart ?? 0)
+    setSourceCurrent(index)
+    if (index >= 0) revealSourceMatch(matches[index])
+  }, [revealSourceMatch])
+
+  const changeQuery = useCallback((next: SearchQuery) => {
+    setQuery(next)
+    runSearch(next)
+  }, [runSearch])
+
+  const openFind = useCallback((withReplace: boolean) => {
+    if (dialogOpenRef.current) return
+    const editor = editorRef.current
+    // Pressed again inside the bar, the selection is just the current match and would replace a regular expression.
+    const fromBar = document.activeElement?.closest('.find-bar')
+    const selected = fromBar ? '' : modeRef.current === 'source' && editor
+      ? editor.value.slice(editor.selectionStart, editor.selectionEnd)
+      : editorApi.current?.selectedText() ?? ''
+    const current = findState.current.query
+    const next = selected && !selected.includes('\n') && selected.length <= 200 ? { ...current, text: selected } : current
+    setFind((state) => ({ open: true, replace: withReplace || (state.open && state.replace) }))
+    setFindFocus((value) => value + 1)
+    changeQuery(next)
+  }, [changeQuery])
+
+  const closeFind = useCallback(() => {
+    setFind((state) => ({ ...state, open: false }))
+    setSourceCurrent(-1)
+    setVisualSearch(NO_RESULT)
+    editorApi.current?.search(null)
+    if (modeRef.current === 'source') editorRef.current?.focus()
+    else editorApi.current?.focus()
+  }, [])
+
+  const stepSearch = useCallback((step: 1 | -1) => {
+    if (!findState.current.open) {
+      openFind(false)
+      return
+    }
+    if (modeRef.current !== 'source') {
+      editorApi.current?.searchStep(step)
+      return
+    }
+    const { matches, index } = sourceSearch.current
+    if (!matches.length) return
+    const next = ((index + step) % matches.length + matches.length) % matches.length
+    setSourceCurrent(next)
+    revealSourceMatch(matches[next])
+  }, [openFind, revealSourceMatch])
+
+  /** Goes through the browser's undo stack, then gives focus back to the search bar. */
+  const replaceSourceText = (next: string) => {
+    const editor = editorRef.current
+    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    if (!editor || !replaceUndoably(editor, next)) updateContent(next)
+    active?.focus()
+  }
+
+  const replaceOne = () => {
+    if (mode === 'reading') return
+    if (mode !== 'source') {
+      editorApi.current?.replace(replacement)
+      return
+    }
+    const match = sourceMatches[sourceIndex]
+    if (!match || !(pattern instanceof RegExp)) return
+    const content = activeDocument.content
+    const text = replacementAt(content, match.start, pattern, query, replacement)
+    sourceReplaceEnd.current = match.start + text.length
+    replaceSourceText(content.slice(0, match.start) + text + content.slice(match.end))
+  }
+
+  const replaceEverything = () => {
+    if (mode === 'reading') return
+    let count = 0
+    if (mode !== 'source') count = editorApi.current?.replaceAll(replacement) ?? 0
+    else if (sourceMatches.length && pattern instanceof RegExp) {
+      count = sourceMatches.length
+      sourceReplaceEnd.current = 0
+      replaceSourceText(replaceEvery(activeDocument.content, sourceMatches, pattern, query, replacement))
+    }
+    if (count) showNotice(`已替换 ${count} 处`)
+  }
+
+  useEffect(() => {
+    const at = sourceReplaceEnd.current
+    if (at === null) return
+    sourceReplaceEnd.current = null
+    const index = matchAfter(sourceMatches, at)
+    setSourceCurrent(index)
+    if (index >= 0) revealSourceMatch(sourceMatches[index])
+  }, [revealSourceMatch, sourceMatches])
 
   const modeChosen = useRef(false)
   // Switching between the source and rendered views keeps the caret line and its place on screen.
@@ -192,12 +346,21 @@ function App() {
     setCurrentLine(anchor.line)
   }, [mode])
 
+  // An open search follows the user into the other view, starting from the restored caret.
+  useLayoutEffect(() => {
+    if (mode === 'source' && findState.current.open) runSearch(findState.current.query)
+  }, [mode, runSearch])
+
   const editorReady = useCallback((api: EditorApi | null) => {
     editorApi.current = api
+    if (!api) return
     const anchor = pendingAnchor.current
-    if (!api || !anchor) return
     pendingAnchor.current = null
-    requestAnimationFrame(() => api.reveal(anchor))
+    requestAnimationFrame(() => {
+      if (anchor) api.reveal(anchor)
+      const { open, query: active } = findState.current
+      if (open) setVisualSearch(api.search(compileQuery(active) instanceof RegExp ? active : null))
+    })
   }, [])
 
   const applyTheme = useCallback((value: Theme) => {
@@ -250,16 +413,24 @@ function App() {
   }, [activeDocument.content, activeDocument.dirty, activeDocument.filePath, autoSaveDocument, composing, preferences.autoSave])
 
   useEffect(() => {
-    // Captured before CodeMirror, whose Ctrl+/ would also comment out the current line of a code block.
-    const toggleSource = (event: globalThis.KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || (event.code !== 'Slash' && event.key !== '/')) return
+    // Captured before CodeMirror, whose Ctrl+/ would also comment out the current line of a code block and whose
+    // Ctrl+F would open its own search panel inside the block.
+    const shortcuts = (event: globalThis.KeyboardEvent) => {
+      const modifier = event.ctrlKey || event.metaKey
+      const key = event.key.toLowerCase()
+      let run: (() => void) | null = null
+      if (modifier && (event.code === 'Slash' || event.key === '/')) run = () => switchMode('toggle')
+      else if (modifier && !event.altKey && !event.shiftKey && key === 'f') run = () => openFind(false)
+      else if (modifier && !event.altKey && !event.shiftKey && key === 'h') run = () => openFind(true)
+      else if (event.key === 'F3' && !modifier && !event.altKey) run = () => stepSearch(event.shiftKey ? -1 : 1)
+      if (!run || dialogOpenRef.current) return
       event.preventDefault()
       event.stopPropagation()
-      switchMode('toggle')
+      run()
     }
-    window.addEventListener('keydown', toggleSource, true)
-    return () => window.removeEventListener('keydown', toggleSource, true)
-  }, [switchMode])
+    window.addEventListener('keydown', shortcuts, true)
+    return () => window.removeEventListener('keydown', shortcuts, true)
+  }, [openFind, stepSearch, switchMode])
 
   useEffect(() => window.inkdown.updates.onState(setUpdateState), [])
   useEffect(() => window.inkdown.feedback.onShow(() => setFeedbackOpen(true)), [])
@@ -342,9 +513,13 @@ function App() {
     else if (command.action === 'save') void saveDocument()
     else if (command.action === 'saveAs') void saveAsDocument()
     else if (command.action === 'insertImage') insertImageRef.current()
+    else if (command.action === 'find') openFind(false)
+    else if (command.action === 'replace') openFind(true)
+    else if (command.action === 'findNext') stepSearch(1)
+    else if (command.action === 'findPrevious') stepSearch(-1)
     else void closeDocument()
   }), [
-    closeDocument, newDocument, openDocument, openPath, saveAsDocument, saveDocument,
+    closeDocument, newDocument, openDocument, openFind, openPath, saveAsDocument, saveDocument, stepSearch,
   ])
 
   const statusMessage = notice ?? status
@@ -400,20 +575,27 @@ function App() {
               </button>
             ))}
           </div>
-          <button className="theme-toggle" type="button"
-            onClick={() => {
-              const next: Theme = dark ? 'light' : 'dark'
-              applyTheme(next)
-              void window.inkdown.view.setTheme(next)
-            }} aria-label="切换明暗主题" title={`当前主题：${theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色'}`}>
-            {dark ? <Sun /> : <Moon />}
-          </button>
-          <button type="button" onClick={() => setSettingsSection('appearance')} title="设置 (Ctrl+,)" aria-label="设置">
-            <Settings />
-          </button>
-          <button type="button" onClick={() => setFeedbackOpen(true)} title="意见反馈" aria-label="意见反馈">
-            <MessageSquarePlus />
-          </button>
+          <span className="action-divider" aria-hidden="true" />
+          <div className="app-actions">
+            <button type="button" className={find.open ? 'active' : ''} onClick={() => openFind(false)}
+              title={mode === 'reading' ? '查找 (Ctrl+F)' : '查找 (Ctrl+F) / 替换 (Ctrl+H)'} aria-label="查找">
+              <Search />
+            </button>
+            <button className="theme-toggle" type="button"
+              onClick={() => {
+                const next: Theme = dark ? 'light' : 'dark'
+                applyTheme(next)
+                void window.inkdown.view.setTheme(next)
+              }} aria-label="切换明暗主题" title={`当前主题：${theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色'}`}>
+              {dark ? <Sun /> : <Moon />}
+            </button>
+            <button type="button" onClick={() => setSettingsSection('appearance')} title="设置 (Ctrl+,)" aria-label="设置">
+              <Settings />
+            </button>
+            <button type="button" onClick={() => setFeedbackOpen(true)} title="意见反馈" aria-label="意见反馈">
+              <MessageSquarePlus />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -492,22 +674,28 @@ function App() {
         )}
         {mode === 'source' ? (
           <section className="editor-pane" aria-label="Markdown 编辑器">
-            <div className="editor-shell">
+            <div className={`editor-shell ${sourceMatches.length ? 'is-searching' : ''}`}>
+              {sourceMatches.length > 0 && sourceTextarea && (
+                <SourceSearchLayer text={activeDocument.content} matches={sourceMatches} current={sourceIndex}
+                  textarea={sourceTextarea} scrollTop={sourceScroll.top} scrollLeft={sourceScroll.left} />
+              )}
               <div className="line-numbers" ref={lineNumbersRef} aria-hidden="true">
                 <span className="line-number-list">{lineNumbers}</span>
                 <span className="current-line-number" style={{
                   '--line-index': Math.min(currentLine, stats.lines) - 1,
                 } as CSSProperties}>{Math.min(currentLine, stats.lines)}</span>
               </div>
-              <textarea ref={editorRef} value={activeDocument.content}
+              <textarea ref={attachSourceTextarea} value={activeDocument.content}
                 onChange={(event) => {
                   typedContent.current = event.target.value
                   updateContent(event.target.value)
                 }}
                 onKeyDown={handleEditorKeyDown} onClick={updateCurrentLine} onKeyUp={updateCurrentLine}
                 onSelect={updateCurrentLine} onScroll={(event) => {
-                  sourceSelection.current.scrollTop = event.currentTarget.scrollTop
-                  if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = event.currentTarget.scrollTop
+                  const { scrollTop, scrollLeft } = event.currentTarget
+                  sourceSelection.current.scrollTop = scrollTop
+                  if (lineNumbersRef.current) lineNumbersRef.current.scrollTop = scrollTop
+                  if (findState.current.open) setSourceScroll({ top: scrollTop, left: scrollLeft })
                 }}
                 onPaste={(event) => {
                   if (!shouldPasteImages(event.clipboardData)) return
@@ -530,9 +718,15 @@ function App() {
             <Suspense fallback={<div className="visual-editor-loading" aria-label="正在准备所见即所得编辑器" />}>
               <WysiwygEditor markdown={activeDocument.content} documentId={activeDocument.documentId}
                 documentPath={activeDocument.filePath} readOnly={mode === 'reading'} codeLanguage={preferences.codeLanguage}
-                onChange={updateContent} onNotice={showNotice} onReady={editorReady} />
+                onChange={updateContent} onNotice={showNotice} onReady={editorReady} onSearchResult={setVisualSearch} />
             </Suspense>
           </section>
+        )}
+        {find.open && (
+          <FindBar query={query} replacement={replacement} showReplace={find.replace} canReplace={mode !== 'reading'}
+            result={searchShown} focusRequest={findFocus} onQueryChange={changeQuery} onReplacementChange={setReplacement}
+            onShowReplaceChange={(replace) => setFind((state) => ({ ...state, replace }))} onStep={stepSearch}
+            onReplace={replaceOne} onReplaceAll={replaceEverything} onClose={closeFind} />
         )}
       </main>
 

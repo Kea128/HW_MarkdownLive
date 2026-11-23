@@ -570,6 +570,14 @@ function buildMenu(): void {
           click: () => send(IPC.documentCommand, { action: 'insertImage' }),
         },
         { type: 'separator' },
+        // The page claims these keys itself, ahead of CodeMirror's own search inside code blocks.
+        ...([
+          ['查找…', 'Ctrl+F', 'find'], ['替换…', 'Ctrl+H', 'replace'],
+          ['查找下一个', 'F3', 'findNext'], ['查找上一个', 'Shift+F3', 'findPrevious'],
+        ] as const).map(([label, accelerator, action]): MenuItemConstructorOptions => ({
+          label, accelerator, registerAccelerator: false, click: () => send(IPC.documentCommand, { action }),
+        })),
+        { type: 'separator' },
         {
           label: '拼写检查',
           type: 'checkbox',

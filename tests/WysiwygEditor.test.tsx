@@ -34,7 +34,16 @@ vi.mock('../src/editor-breaks', () => ({
   keepInlineBreaks: vi.fn(),
 }))
 
-vi.mock('../src/editor-guards', () => ({ guardReadOnly: vi.fn() }))
+vi.mock('../src/editor-guards', () => ({ codeReadOnlyOverride: {}, guardReadOnly: vi.fn(), syncCodeReadOnly: vi.fn() }))
+vi.mock('../src/editor-search', () => ({
+  codeSearchHighlight: {},
+  installSearch: vi.fn(),
+  moveSearch: vi.fn(),
+  replaceAllMatches: vi.fn(() => 0),
+  replaceCurrent: vi.fn(() => false),
+  searchResult: vi.fn(() => ({ count: 0, current: -1 })),
+  setSearchQuery: vi.fn(),
+}))
 vi.mock('../src/link-definitions', () => ({ preserveLinkDefinitions: vi.fn() }))
 vi.mock('../src/latex-fences', () => ({ keepLatexFences: vi.fn() }))
 
